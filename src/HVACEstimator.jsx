@@ -180,9 +180,8 @@ export default function HVACEstimator() {
       <p><strong>Scope Summary:</strong> {scopeSummary}</p>
       <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} />
 
-      <!-- rest unchanged -->
+      {/* rest unchanged */}
     </div>
   );
 }
-
 
