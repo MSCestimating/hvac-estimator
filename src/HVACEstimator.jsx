@@ -1,4 +1,4 @@
-// Full HVACEstimator.jsx with GPT-style AI summary from blueprint text
+// Full HVACEstimator.jsx with AI blueprint analysis + vendor quotes + labor + VE + export
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,18 +35,16 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
-// Simulated GPT-style analysis of blueprint text
 function getBlueprintInsights(text) {
   const summary = [];
   const rtuCount = (text.match(/RTU/gi) || []).length;
   const fanCount = (text.match(/fan/gi) || []).length;
   const zoneCount = (text.match(/zone/gi) || []).length;
   const ductEstimate = text.length > 500 ? 1000 : 300;
-  if (rtuCount) summary.push(`Detected ${rtuCount} Rooftop Units (RTUs)`);
+  if (rtuCount) summary.push(`Detected ${rtuCount} Rooftop Units`);
   if (fanCount) summary.push(`Detected ${fanCount} Fans`);
   if (zoneCount) summary.push(`Detected ${zoneCount} Zones`);
   summary.push(`Estimated Ductwork: ${ductEstimate} ft`);
-  if (summary.length === 0) summary.push("No major HVAC components detected in blueprint text.");
   return summary.join("\n");
 }
 
@@ -54,8 +52,16 @@ export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [quoteItems, setQuoteItems] = useState([{ description: "Rooftop Unit", qty: 1, unitPrice: 12000, vendor: "", status: "Requested", leadTime: 6 }]);
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [scopeSummary, setScopeSummary] = useState("");
   const [blueprintText, setBlueprintText] = useState("");
+  const [veSuggestions, setVeSuggestions] = useState([]);
+  const [laborInputs, setLaborInputs] = useState({
+    ductwork: { qty: 0, hrsPerUnit: 0.1, rate: 60 },
+    piping: { qty: 0, hrsPerUnit: 0.15, rate: 65 },
+    controls: { qty: 0, hrsPerUnit: 0.2, rate: 75 },
+    airDist: { qty: 0, hrsPerUnit: 0.05, rate: 55 }
+  });
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => {
@@ -66,6 +72,41 @@ export default function HVACEstimator() {
   const handleLogin = async () => await signInWithPopup(auth, provider);
   const handleLogout = async () => await signOut(auth);
   const handleProjectChange = (field, value) => setProject({ ...project, [field]: value });
+
+  const handleItemChange = (index, field, value) => {
+    const updated = [...quoteItems];
+    updated[index][field] = field === "qty" || field === "unitPrice" || field === "leadTime" ? Number(value) : value;
+    setQuoteItems(updated);
+  };
+
+  const addItem = () => setQuoteItems([...quoteItems, { description: "", qty: 0, unitPrice: 0, vendor: "", status: "Requested", leadTime: 0 }]);
+  const removeItem = (i) => setQuoteItems(quoteItems.filter((_, idx) => i !== idx));
+
+  const saveEstimate = async () => {
+    if (!user) return alert("Login required");
+    await addDoc(collection(db, "estimates"), { project, quoteItems, user: user.email, timestamp: new Date() });
+    alert("Saved to Firebase!");
+  };
+
+  const loadEstimates = async () => {
+    const snap = await getDocs(collection(db, "estimates"));
+    setQuoteItems(snap.docs[0]?.data()?.quoteItems || []);
+    setProject(snap.docs[0]?.data()?.project || project);
+  };
+
+  const handleQuoteUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!selectedCategory || files.length === 0) return alert("Select category + file");
+    const added = files.map((f, i) => ({
+      description: `${selectedCategory} - Quote ${i + 1}`,
+      qty: 1,
+      unitPrice: 5000 + i * 500,
+      vendor: "Uploaded",
+      status: "Received",
+      leadTime: 4
+    }));
+    setQuoteItems([...quoteItems, ...added]);
+  };
 
   const extractPDFText = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -89,18 +130,55 @@ export default function HVACEstimator() {
     setScopeSummary(summary);
   };
 
+  const suggestVEOptions = () => {
+    const ve = quoteItems.map((item) => ({
+      original: item.description,
+      suggestion: item.description + " (alt brand)",
+      savings: Math.floor(item.unitPrice * 0.15)
+    }));
+    setVeSuggestions(ve);
+  };
+
+  const calculateLaborTotal = () => {
+    return Object.values(laborInputs).reduce((sum, l) => sum + l.qty * l.hrsPerUnit * l.rate, 0);
+  };
+
+  const materialTotal = quoteItems.reduce((sum, i) => sum + i.qty * i.unitPrice, 0);
+  const laborTotal = calculateLaborTotal();
+  const subtotal = materialTotal + laborTotal;
+  const markup = 0.15 * subtotal;
+  const total = subtotal + markup;
+  const marginPercent = ((markup / total) * 100).toFixed(1);
+  const maxLeadTime = Math.max(...quoteItems.map(i => i.leadTime || 0));
+
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.text("HVAC Estimate", 20, 20);
+    doc.text(`Project: ${project.name}`, 20, 30);
+    doc.text(`Location: ${project.location}`, 20, 36);
+    doc.text(`Scope Summary: ${scopeSummary}`, 20, 44);
+    quoteItems.forEach((item, i) => {
+      const y = 52 + i * 6;
+      doc.text(`${item.description} - ${item.vendor} | Qty: ${item.qty} | Unit: $${item.unitPrice} | Status: ${item.status}`, 20, y);
+    });
+    doc.text(`Material: $${materialTotal.toFixed(2)}`, 20, 140);
+    doc.text(`Labor: $${laborTotal.toFixed(2)}`, 20, 146);
+    doc.text(`Markup (15%): $${markup.toFixed(2)}`, 20, 152);
+    doc.text(`Total: $${total.toFixed(2)}`, 20, 158);
+    doc.text(`Margin: ${marginPercent}%`, 20, 164);
+    doc.text(`Longest Lead Time: ${maxLeadTime} weeks`, 20, 170);
+    doc.text("Value Engineering Suggestions:", 20, 180);
+    veSuggestions.forEach((v, i) => {
+      doc.text(`${v.original} → ${v.suggestion} | Savings: $${v.savings}`, 20, 186 + i * 6);
+    });
+    doc.save("HVAC_Estimate.pdf");
+  };
+
   return (
     <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
-      <h1>HVAC Estimator AI</h1>
+      <h1>HVAC Estimator Pro</h1>
 
-      {user ? (
-        <>
-          <p>Welcome, {user.displayName}</p>
-          <button onClick={handleLogout}>Logout</button>
-        </>
-      ) : (
-        <button onClick={handleLogin}>Login with Google</button>
-      )}
+      {user ? (<><p>Welcome, {user.displayName}</p><button onClick={handleLogout}>Logout</button></>) : (<button onClick={handleLogin}>Login with Google</button>)}
 
       <input placeholder="Project Name" value={project.name} onChange={e => handleProjectChange("name", e.target.value)} />
       <input placeholder="Location" value={project.location} onChange={e => handleProjectChange("location", e.target.value)} />
@@ -109,17 +187,54 @@ export default function HVACEstimator() {
 
       <h3>Blueprint Upload</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
+      <pre><strong>Scope Summary:</strong>\n{scopeSummary}</pre>
+      <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%", marginBottom: "2rem" }} />
 
-      <p><strong>AI Scope Summary:</strong></p>
-      <pre style={{ background: "#f4f4f4", padding: "1rem" }}>{scopeSummary}</pre>
+      <h3>Quote Line Items</h3>
+      {quoteItems.map((item, i) => (
+        <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+          <input value={item.description} onChange={e => handleItemChange(i, "description", e.target.value)} placeholder="Description" />
+          <input type="number" value={item.qty} onChange={e => handleItemChange(i, "qty", e.target.value)} placeholder="Qty" />
+          <input type="number" value={item.unitPrice} onChange={e => handleItemChange(i, "unitPrice", e.target.value)} placeholder="Unit Price" />
+          <input value={item.vendor} onChange={e => handleItemChange(i, "vendor", e.target.value)} placeholder="Vendor" />
+          <input value={item.status} onChange={e => handleItemChange(i, "status", e.target.value)} placeholder="Status" />
+          <input type="number" value={item.leadTime} onChange={e => handleItemChange(i, "leadTime", e.target.value)} placeholder="Lead Time" />
+          <button onClick={() => removeItem(i)}>Remove</button>
+        </div>
+      ))}
+      <button onClick={addItem}>Add Quote Item</button>
 
-      <h4>Extracted Text (Preview):</h4>
-      <textarea
-        rows="6"
-        value={blueprintText.slice(0, 1000)}
-        readOnly
-        style={{ width: "100%", marginBottom: "2rem" }}
-      />
+      <h3>Vendor Quote Upload</h3>
+      <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+        <option value="">-- Select Category --</option>
+        <option>Rooftop Units</option>
+        <option>Fans</option>
+        <option>Dryer Vents</option>
+        <option>Diffusers</option>
+        <option>Louvers</option>
+      </select>
+      <input type="file" multiple onChange={handleQuoteUpload} />
+
+      <h3>Labor Breakdown</h3>
+      {Object.entries(laborInputs).map(([key, val]) => (
+        <div key={key}>
+          <strong>{key}</strong>
+          <input type="number" value={val.qty} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, qty: +e.target.value } })} placeholder="Qty" />
+          <input type="number" value={val.hrsPerUnit} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, hrsPerUnit: +e.target.value } })} placeholder="Hours/Unit" />
+          <input type="number" value={val.rate} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, rate: +e.target.value } })} placeholder="Rate/hr" />
+        </div>
+      ))}
+
+      <button onClick={saveEstimate}>Save to Cloud</button>
+      <button onClick={loadEstimates}>Load Saved</button>
+      <button onClick={exportPDF}>Export PDF</button>
+      <button onClick={suggestVEOptions}>Suggest VE</button>
+
+      <h3>Totals</h3>
+      <p>Material: ${materialTotal.toFixed(2)}</p>
+      <p>Labor: ${laborTotal.toFixed(2)}</p>
+      <p>Margin: {marginPercent}%</p>
+      <p>Total: ${total.toFixed(2)}</p>
     </div>
   );
 }
