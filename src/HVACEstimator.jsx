@@ -1,4 +1,4 @@
-// Full HVACEstimator.jsx with AI blueprint analysis + vendor quotes + labor + VE + export
+// Full HVACEstimator.jsx with working VE rendering + blueprint AI material & scope detection
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -36,28 +36,34 @@ const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
 function getBlueprintInsights(text) {
-  const summary = [];
   const rtuCount = (text.match(/RTU/gi) || []).length;
-  const fanCount = (text.match(/fan/gi) || []).length;
-  const zoneCount = (text.match(/zone/gi) || []).length;
-  const ductEstimate = text.length > 500 ? 1000 : 300;
-  if (rtuCount) summary.push(`Detected ${rtuCount} Rooftop Units`);
-  if (fanCount) summary.push(`Detected ${fanCount} Fans`);
-  if (zoneCount) summary.push(`Detected ${zoneCount} Zones`);
-  summary.push(`Estimated Ductwork: ${ductEstimate} ft`);
-  return summary.join("\n");
+  const fanCount = (text.match(/FAN/gi) || []).length;
+  const zoneCount = (text.match(/ZONE/gi) || []).length;
+  const diffuserCount = (text.match(/DIFFUSER/gi) || []).length;
+  const ductEstimate = (zoneCount || 1) * 300 + rtuCount * 100;
+
+  const scope = [
+    `Detected ${rtuCount} Rooftop Units`,
+    `Detected ${fanCount} Fans`,
+    `Detected ${diffuserCount} Diffusers`,
+    `Estimated ${ductEstimate} ft of ductwork`,
+    `Estimated ${zoneCount || 1} zones`,
+    `Scope: Furnish and install complete HVAC system per plan, including ductwork, RTUs, hangers, insulation, and controls.`
+  ];
+
+  return scope.join("\n");
 }
 
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
-  const [quoteItems, setQuoteItems] = useState([{ description: "Rooftop Unit", qty: 1, unitPrice: 12000, vendor: "", status: "Requested", leadTime: 6 }]);
+  const [quoteItems, setQuoteItems] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [scopeSummary, setScopeSummary] = useState("");
   const [blueprintText, setBlueprintText] = useState("");
   const [veSuggestions, setVeSuggestions] = useState([]);
   const [laborInputs, setLaborInputs] = useState({
-    ductwork: { qty: 0, hrsPerUnit: 0.1, rate: 60 },
+    ductwork: { qty: 1000, hrsPerUnit: 0.1, rate: 60 },
     piping: { qty: 0, hrsPerUnit: 0.15, rate: 65 },
     controls: { qty: 0, hrsPerUnit: 0.2, rate: 75 },
     airDist: { qty: 0, hrsPerUnit: 0.05, rate: 55 }
@@ -86,12 +92,6 @@ export default function HVACEstimator() {
     if (!user) return alert("Login required");
     await addDoc(collection(db, "estimates"), { project, quoteItems, user: user.email, timestamp: new Date() });
     alert("Saved to Firebase!");
-  };
-
-  const loadEstimates = async () => {
-    const snap = await getDocs(collection(db, "estimates"));
-    setQuoteItems(snap.docs[0]?.data()?.quoteItems || []);
-    setProject(snap.docs[0]?.data()?.project || project);
   };
 
   const handleQuoteUpload = async (e) => {
@@ -139,45 +139,15 @@ export default function HVACEstimator() {
     setVeSuggestions(ve);
   };
 
-  const calculateLaborTotal = () => {
-    return Object.values(laborInputs).reduce((sum, l) => sum + l.qty * l.hrsPerUnit * l.rate, 0);
-  };
-
   const materialTotal = quoteItems.reduce((sum, i) => sum + i.qty * i.unitPrice, 0);
-  const laborTotal = calculateLaborTotal();
+  const laborTotal = Object.values(laborInputs).reduce((sum, l) => sum + l.qty * l.hrsPerUnit * l.rate, 0);
   const subtotal = materialTotal + laborTotal;
   const markup = 0.15 * subtotal;
   const total = subtotal + markup;
-  const marginPercent = ((markup / total) * 100).toFixed(1);
-  const maxLeadTime = Math.max(...quoteItems.map(i => i.leadTime || 0));
-
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.text("HVAC Estimate", 20, 20);
-    doc.text(`Project: ${project.name}`, 20, 30);
-    doc.text(`Location: ${project.location}`, 20, 36);
-    doc.text(`Scope Summary: ${scopeSummary}`, 20, 44);
-    quoteItems.forEach((item, i) => {
-      const y = 52 + i * 6;
-      doc.text(`${item.description} - ${item.vendor} | Qty: ${item.qty} | Unit: $${item.unitPrice} | Status: ${item.status}`, 20, y);
-    });
-    doc.text(`Material: $${materialTotal.toFixed(2)}`, 20, 140);
-    doc.text(`Labor: $${laborTotal.toFixed(2)}`, 20, 146);
-    doc.text(`Markup (15%): $${markup.toFixed(2)}`, 20, 152);
-    doc.text(`Total: $${total.toFixed(2)}`, 20, 158);
-    doc.text(`Margin: ${marginPercent}%`, 20, 164);
-    doc.text(`Longest Lead Time: ${maxLeadTime} weeks`, 20, 170);
-    doc.text("Value Engineering Suggestions:", 20, 180);
-    veSuggestions.forEach((v, i) => {
-      doc.text(`${v.original} → ${v.suggestion} | Savings: $${v.savings}`, 20, 186 + i * 6);
-    });
-    doc.save("HVAC_Estimate.pdf");
-  };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
       <h1>HVAC Estimator Pro</h1>
-
       {user ? (<><p>Welcome, {user.displayName}</p><button onClick={handleLogout}>Logout</button></>) : (<button onClick={handleLogin}>Login with Google</button>)}
 
       <input placeholder="Project Name" value={project.name} onChange={e => handleProjectChange("name", e.target.value)} />
@@ -187,8 +157,9 @@ export default function HVACEstimator() {
 
       <h3>Blueprint Upload</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
-      <pre><strong>Scope Summary:</strong>\n{scopeSummary}</pre>
-      <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%", marginBottom: "2rem" }} />
+      <pre style={{ background: "#f8f8f8", padding: "1rem" }}>{scopeSummary}</pre>
+
+      <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%", marginBottom: "1rem" }} />
 
       <h3>Quote Line Items</h3>
       {quoteItems.map((item, i) => (
@@ -202,20 +173,20 @@ export default function HVACEstimator() {
           <button onClick={() => removeItem(i)}>Remove</button>
         </div>
       ))}
-      <button onClick={addItem}>Add Quote Item</button>
+      <button onClick={addItem}>Add Item</button>
 
-      <h3>Vendor Quote Upload</h3>
+      <h3>Upload Vendor Quotes</h3>
       <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
         <option value="">-- Select Category --</option>
-        <option>Rooftop Units</option>
+        <option>RTUs</option>
         <option>Fans</option>
-        <option>Dryer Vents</option>
-        <option>Diffusers</option>
         <option>Louvers</option>
+        <option>Diffusers</option>
+        <option>Dryer Vents</option>
       </select>
       <input type="file" multiple onChange={handleQuoteUpload} />
 
-      <h3>Labor Breakdown</h3>
+      <h3>Labor Inputs</h3>
       {Object.entries(laborInputs).map(([key, val]) => (
         <div key={key}>
           <strong>{key}</strong>
@@ -225,16 +196,25 @@ export default function HVACEstimator() {
         </div>
       ))}
 
-      <button onClick={saveEstimate}>Save to Cloud</button>
-      <button onClick={loadEstimates}>Load Saved</button>
-      <button onClick={exportPDF}>Export PDF</button>
       <button onClick={suggestVEOptions}>Suggest VE</button>
+      {veSuggestions.length > 0 && (
+        <div style={{ marginTop: "1rem" }}>
+          <h4>Value Engineering Suggestions</h4>
+          <ul>
+            {veSuggestions.map((v, i) => (
+              <li key={i}>{v.original} → {v.suggestion} — Save ${v.savings}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-      <h3>Totals</h3>
-      <p>Material: ${materialTotal.toFixed(2)}</p>
-      <p>Labor: ${laborTotal.toFixed(2)}</p>
-      <p>Margin: {marginPercent}%</p>
-      <p>Total: ${total.toFixed(2)}</p>
+      <h3>Summary</h3>
+      <p>Material Total: ${materialTotal.toFixed(2)}</p>
+      <p>Labor Total: ${laborTotal.toFixed(2)}</p>
+      <p>Markup: ${(markup).toFixed(2)}</p>
+      <p><strong>Total: ${total.toFixed(2)}</strong></p>
+
+      <button onClick={saveEstimate}>Save Estimate</button>
     </div>
   );
 }
