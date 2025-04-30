@@ -1,3 +1,4 @@
+// Full working HVACEstimator.jsx with vendor quotes, labor, blueprint analysis, and PDF export
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -78,12 +79,6 @@ export default function HVACEstimator() {
   const loadEstimates = async () => {
     const snap = await getDocs(collection(db, "estimates"));
     setSavedEstimates(snap.docs.map(doc => doc.data()));
-  };
-
-  const loadEstimate = (index) => {
-    const est = savedEstimates[index];
-    setProject(est.project);
-    setQuoteItems(est.quoteItems);
   };
 
   const handleQuoteUpload = async (e) => {
@@ -173,14 +168,7 @@ export default function HVACEstimator() {
     <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
       <h1>HVAC Estimator Pro</h1>
 
-      {user ? (
-        <>
-          <p>Welcome, {user.displayName}</p>
-          <button onClick={handleLogout}>Logout</button>
-        </>
-      ) : (
-        <button onClick={handleLogin}>Login with Google</button>
-      )}
+      {user ? (<><p>Welcome, {user.displayName}</p><button onClick={handleLogout}>Logout</button></>) : (<button onClick={handleLogin}>Login with Google</button>)}
 
       <input placeholder="Project Name" value={project.name} onChange={e => handleProjectChange("name", e.target.value)} />
       <input placeholder="Location" value={project.location} onChange={e => handleProjectChange("location", e.target.value)} />
@@ -190,14 +178,53 @@ export default function HVACEstimator() {
       <h3>Blueprint Upload for AI Scope Reading</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
       <p><strong>Scope Summary:</strong> {scopeSummary}</p>
-      <textarea
-        rows="6"
-        value={blueprintText.slice(0, 1000)}
-        readOnly
-        style={{ width: "100%", marginBottom: "2rem" }}
-      />
+      <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%", marginBottom: "2rem" }} />
 
-      {/* Continue with quote item management, VE, PDF, etc... */}
+      <h3>Quote Line Items</h3>
+      {quoteItems.map((item, i) => (
+        <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+          <input value={item.description} onChange={e => handleItemChange(i, "description", e.target.value)} placeholder="Description" />
+          <input type="number" value={item.qty} onChange={e => handleItemChange(i, "qty", e.target.value)} placeholder="Qty" />
+          <input type="number" value={item.unitPrice} onChange={e => handleItemChange(i, "unitPrice", e.target.value)} placeholder="Unit Price" />
+          <input value={item.vendor} onChange={e => handleItemChange(i, "vendor", e.target.value)} placeholder="Vendor" />
+          <input value={item.status} onChange={e => handleItemChange(i, "status", e.target.value)} placeholder="Status" />
+          <input type="number" value={item.leadTime} onChange={e => handleItemChange(i, "leadTime", e.target.value)} placeholder="Lead Time" />
+          <button onClick={() => removeItem(i)}>Remove</button>
+        </div>
+      ))}
+      <button onClick={addItem}>Add Quote Item</button>
+
+      <h3>Vendor Quote Upload</h3>
+      <select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+        <option value="">-- Select Category --</option>
+        <option>Rooftop Units</option>
+        <option>Fans</option>
+        <option>Dryer Vents</option>
+        <option>Diffusers</option>
+        <option>Louvers</option>
+      </select>
+      <input type="file" multiple onChange={handleQuoteUpload} />
+
+      <h3>Labor Breakdown</h3>
+      {Object.entries(laborInputs).map(([key, val]) => (
+        <div key={key}>
+          <strong>{key}</strong>
+          <input type="number" value={val.qty} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, qty: +e.target.value } })} placeholder="Qty" />
+          <input type="number" value={val.hrsPerUnit} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, hrsPerUnit: +e.target.value } })} placeholder="Hours/Unit" />
+          <input type="number" value={val.rate} onChange={e => setLaborInputs({ ...laborInputs, [key]: { ...val, rate: +e.target.value } })} placeholder="Rate/hr" />
+        </div>
+      ))}
+
+      <button onClick={saveEstimate}>Save to Cloud</button>
+      <button onClick={loadEstimates}>Load Saved</button>
+      <button onClick={exportPDF}>Export PDF</button>
+      <button onClick={suggestVEOptions}>Suggest VE</button>
+
+      <h3>Totals</h3>
+      <p>Material: ${materialTotal.toFixed(2)}</p>
+      <p>Labor: ${laborTotal.toFixed(2)}</p>
+      <p>Margin: {marginPercent}%</p>
+      <p>Total: ${total.toFixed(2)}</p>
     </div>
   );
 }
