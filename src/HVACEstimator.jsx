@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import jsPDF from 'jspdf';
 import {
   initializeApp
 } from 'firebase/app';
@@ -119,6 +120,32 @@ export default function HVACEstimator() {
     setQuoteItems([...quoteItems, ...simulatedParsedItems]);
   };
 
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text("HVAC Project Estimate", 20, 20);
+
+    doc.setFontSize(11);
+    doc.text(`Project: ${project.name}`, 20, 30);
+    doc.text(`Location: ${project.location}`, 20, 36);
+    doc.text(`Square Footage: ${project.squareFootage}`, 20, 42);
+    doc.text(`Floors: ${project.floors}`, 20, 48);
+
+    doc.text("Quote Line Items:", 20, 58);
+    quoteItems.forEach((item, i) => {
+      const y = 64 + i * 6;
+      doc.text(
+        `${item.description} | Qty: ${item.qty} | Unit: $${item.unitPrice} | Total: $${(item.qty * item.unitPrice).toFixed(2)}`,
+        20,
+        y
+      );
+    });
+
+    const yEnd = 70 + quoteItems.length * 6;
+    doc.text(`Total: $${total.toFixed(2)}`, 20, yEnd);
+    doc.save(`${project.name || "Estimate"}.pdf`);
+  };
+
   return (
     <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>HVAC Estimator</h1>
@@ -185,6 +212,7 @@ export default function HVACEstimator() {
       <div style={{ marginTop: '1rem' }}>
         <button onClick={saveEstimate}>Save Estimate to Cloud</button>
         <button onClick={loadEstimates}>Load Saved</button>
+        <button onClick={exportPDF}>Export to PDF</button>
 
         {savedEstimates.length > 0 && (
           <div>
