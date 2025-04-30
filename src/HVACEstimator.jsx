@@ -16,7 +16,7 @@ import {
   signOut
 } from 'firebase/auth';
 
-// Firebase config from .env.local
+// Firebase config from .env
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -35,10 +35,23 @@ const provider = new GoogleAuthProvider();
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: '', location: '', squareFootage: '', floors: '' });
-  const [quoteItems, setQuoteItems] = useState([
-    { description: 'Rooftop Unit', qty: 1, unitPrice: 12000 }
-  ]);
+  const [quoteItems, setQuoteItems] = useState([{ description: 'Rooftop Unit', qty: 1, unitPrice: 12000 }]);
   const [savedEstimates, setSavedEstimates] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+  }, []);
+
+  const handleLogin = async () => {
+    await signInWithPopup(auth, provider);
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   const handleProjectChange = (field, value) => {
     setProject({ ...project, [field]: value });
@@ -59,21 +72,6 @@ export default function HVACEstimator() {
   };
 
   const total = quoteItems.reduce((sum, item) => sum + item.qty * item.unitPrice, 0);
-
-  // Firebase Auth
-  useEffect(() => {
-    onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-  }, []);
-
-  const handleLogin = async () => {
-    await signInWithPopup(auth, provider);
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
 
   const saveEstimate = async () => {
     if (!user) {
@@ -103,6 +101,22 @@ export default function HVACEstimator() {
       setProject(est.project);
       setQuoteItems(est.quoteItems);
     }
+  };
+
+  const handleQuoteUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!selectedCategory || files.length === 0) {
+      alert("Please select a category and choose at least one file.");
+      return;
+    }
+
+    const simulatedParsedItems = files.map((file, i) => ({
+      description: `${selectedCategory} - Quote ${i + 1}`,
+      qty: 1,
+      unitPrice: Math.floor(Math.random() * 5000) + 5000
+    }));
+
+    setQuoteItems([...quoteItems, ...simulatedParsedItems]);
   };
 
   return (
@@ -153,6 +167,19 @@ export default function HVACEstimator() {
           </div>
         ))}
         <button onClick={addItem}>Add Item</button>
+      </div>
+
+      <div style={{ marginTop: '2rem' }}>
+        <h2>Vendor Quote Upload</h2>
+        <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+          <option value="">-- Select Category --</option>
+          <option value="Rooftop Units">Rooftop Units</option>
+          <option value="Fans">Fans</option>
+          <option value="Dryer Vents">Dryer Vents</option>
+          <option value="Diffusers">Diffusers</option>
+          <option value="Louvers">Louvers</option>
+        </select>
+        <input type="file" multiple onChange={handleQuoteUpload} />
       </div>
 
       <div style={{ marginTop: '1rem' }}>
