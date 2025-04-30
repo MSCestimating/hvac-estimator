@@ -2,9 +2,7 @@ import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.entry";
-import {
-  initializeApp
-} from "firebase/app";
+import { initializeApp } from "firebase/app";
 import {
   getFirestore,
   collection,
@@ -91,7 +89,14 @@ export default function HVACEstimator() {
   const handleQuoteUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!selectedCategory || files.length === 0) return alert("Select category + file");
-    const added = files.map((f, i) => ({ description: `${selectedCategory} - Quote ${i+1}`, qty: 1, unitPrice: 5000 + i * 500, vendor: "Uploaded", status: "Received", leadTime: 4 }));
+    const added = files.map((f, i) => ({
+      description: `${selectedCategory} - Quote ${i + 1}`,
+      qty: 1,
+      unitPrice: 5000 + i * 500,
+      vendor: "Uploaded",
+      status: "Received",
+      leadTime: 4
+    }));
     setQuoteItems([...quoteItems, ...added]);
   };
 
@@ -117,7 +122,7 @@ export default function HVACEstimator() {
   };
 
   const suggestVEOptions = () => {
-    const ve = quoteItems.map((item, i) => ({
+    const ve = quoteItems.map((item) => ({
       original: item.description,
       suggestion: item.description + " (alt brand)",
       savings: Math.floor(item.unitPrice * 0.15)
@@ -168,7 +173,14 @@ export default function HVACEstimator() {
     <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
       <h1>HVAC Estimator Pro</h1>
 
-      {user ? (<><p>Welcome, {user.displayName}</p><button onClick={handleLogout}>Logout</button></>) : (<button onClick={handleLogin}>Login with Google</button>)}
+      {user ? (
+        <>
+          <p>Welcome, {user.displayName}</p>
+          <button onClick={handleLogout}>Logout</button>
+        </>
+      ) : (
+        <button onClick={handleLogin}>Login with Google</button>
+      )}
 
       <input placeholder="Project Name" value={project.name} onChange={e => handleProjectChange("name", e.target.value)} />
       <input placeholder="Location" value={project.location} onChange={e => handleProjectChange("location", e.target.value)} />
@@ -178,10 +190,14 @@ export default function HVACEstimator() {
       <h3>Blueprint Upload for AI Scope Reading</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
       <p><strong>Scope Summary:</strong> {scopeSummary}</p>
-      <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} />
+      <textarea
+        rows="6"
+        value={blueprintText.slice(0, 1000)}
+        readOnly
+        style={{ width: "100%", marginBottom: "2rem" }}
+      />
 
-      {/* rest unchanged */}
+      {/* Continue with quote item management, VE, PDF, etc... */}
     </div>
   );
 }
-
