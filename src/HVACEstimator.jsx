@@ -1,5 +1,5 @@
-// HVACEstimator.jsx with canvas-based PDF rendering for scale calibration
-import React, { useState, useEffect, useRef } from "react";
+// HVACEstimator.jsx with duct, pipe, equipment, air distribution, sizes
+import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.entry";
@@ -49,7 +49,7 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND|FAN)[-\s]?\d+\b/gi)].map(m => m[0]);
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
     const key = tag.split(/[-\s]/)[0].toUpperCase();
     acc[key] = (acc[key] || 0) + 1;
@@ -89,10 +89,17 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const linearFeet = [...text.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/gi)].map(m => parseInt(m[1]));
-  const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
+  const ductMentions = [...text.matchAll(/\b(\d{1,4})\s?(FT|FOOT|FEET)\s?DUCT\b/gi)].map(m => parseInt(m[1]));
+  const pipeMentions = [...text.matchAll(/\b(\d{1,4})\s?(FT|FOOT|FEET)\s?PIPE\b/gi)].map(m => parseInt(m[1]));
 
-  return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
+  return {
+    equipmentCounts,
+    airDist,
+    pipingCounts,
+    sizeCounts,
+    ductLength: ductMentions.reduce((a, b) => a + b, 0),
+    pipeLength: pipeMentions.reduce((a, b) => a + b, 0)
+  };
 }
 
 export default function HVACEstimator() {
@@ -100,24 +107,10 @@ export default function HVACEstimator() {
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
-  const canvasRef = useRef(null);
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
   }, []);
-
-  const renderPDFPageToCanvas = async (file) => {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-    const renderContext = { canvasContext: context, viewport };
-    await page.render(renderContext).promise;
-  };
 
   const extractPDFText = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -135,7 +128,6 @@ export default function HVACEstimator() {
   const handleBlueprintUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    await renderPDFPageToCanvas(file);
     const text = await extractPDFText(file);
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
@@ -156,40 +148,34 @@ export default function HVACEstimator() {
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
-      <canvas ref={canvasRef} style={{ marginTop: "1rem", border: "1px solid #ccc" }} />
-
       {counts && (
         <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
-          <h4>📊 Visual Count Breakdown:</h4>
+          <h4>📊 Scope Breakdown:</h4>
+          <h5>🔹 Air Distribution</h5>
           <ul>
             <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
             <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
-            <li><strong>Total Supply Devices:</strong> {counts.airDist.supplyTotal}</li>
             <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
             <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
             <li><strong>Registers:</strong> {counts.airDist.registers}</li>
-            <li><strong>Total Return Devices:</strong> {counts.airDist.returnTotal}</li>
           </ul>
-          <h4>🧰 Equipment Tags:</h4>
+          <h5>🔧 Equipment</h5>
           <ul>
-            {Object.entries(counts.equipmentCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
-            ))}
+            {Object.entries(counts.equipmentCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
           </ul>
-          <h4>🛠️ Piping Runs:</h4>
+          <h5>📐 Duct & Pipe Lengths</h5>
           <ul>
-            {Object.entries(counts.pipingCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
-            ))}
+            <li><strong>Duct Length:</strong> {counts.ductLength} feet</li>
+            <li><strong>Pipe Length:</strong> {counts.pipeLength} feet</li>
           </ul>
-          <h4>📐 Device Sizes:</h4>
+          <h5>🛠️ Pipe Sizes</h5>
           <ul>
-            {Object.entries(counts.sizeCounts).map(([size, count]) => (
-              <li key={size}><strong>{size}</strong>: {count}</li>
-            ))}
+            {Object.entries(counts.pipingCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
           </ul>
-          <h4>📏 Estimated Linear Footage:</h4>
-          <p><strong>Total:</strong> {counts.linearTakeoff} feet</p>
+          <h5>📏 Device Sizes</h5>
+          <ul>
+            {Object.entries(counts.sizeCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
         </div>
       )}
 
