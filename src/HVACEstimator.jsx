@@ -1,9 +1,8 @@
-// HVACEstimator.jsx with OCR fallback using tesseract.js
+// HVACEstimator.jsx with dynamic OCR import for Vercel compatibility
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.entry";
-import Tesseract from "tesseract.js";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -99,7 +98,6 @@ export default function HVACEstimator() {
       fullText += strings + "\n";
     }
 
-    // If PDF text is empty or minimal, fallback to OCR
     if (fullText.length < 50) {
       const page = await pdf.getPage(1);
       const viewport = page.getViewport({ scale: 2 });
@@ -108,8 +106,14 @@ export default function HVACEstimator() {
       canvas.height = viewport.height;
       canvas.width = viewport.width;
       await page.render({ canvasContext: context, viewport }).promise;
-      const result = await Tesseract.recognize(canvas, "eng");
-      fullText = result.data.text;
+
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker();
+      await worker.loadLanguage("eng");
+      await worker.initialize("eng");
+      const { data } = await worker.recognize(canvas);
+      await worker.terminate();
+      fullText = data.text;
     }
 
     return fullText;
@@ -150,4 +154,5 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
 
