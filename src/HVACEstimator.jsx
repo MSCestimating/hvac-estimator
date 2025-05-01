@@ -73,6 +73,5 @@ function extractHVACDetails(text) {
     ductLength: ductMentions.reduce((a, b) => a + b, 0),
     pipeLength: pipeMentions.reduce((a, b) => a + b, 0)
   };
-}
 export default HVACEstimator;
 
