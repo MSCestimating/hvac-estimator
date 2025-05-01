@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with air distribution detection (grilles, diffusers, registers)
+// HVACEstimator.jsx with R/S tag integration for supply and return counts
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,7 +49,7 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|S|R|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
   const ductSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => ({ w: +m[1], h: +m[2] }));
   const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
     size: normalizeFractionalSize(m[1]),
@@ -60,7 +60,9 @@ function extractHVACDetails(text) {
   const airDist = {
     diffusers: (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD|RD)\b/gi) || []).length,
     grilles: (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length,
-    registers: (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length
+    registers: (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length,
+    supplyTags: (text.match(/\bS[-\s]?\d+\b/gi) || []).length,
+    returnTags: (text.match(/\bR[-\s]?\d+\b/gi) || []).length
   };
 
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
@@ -97,6 +99,8 @@ function summarizeScope(data) {
   if (airDist.diffusers) sections["Air Distribution"].push(`Install ${airDist.diffusers} diffusers.`);
   if (airDist.grilles) sections["Air Distribution"].push(`Install ${airDist.grilles} grilles.`);
   if (airDist.registers) sections["Air Distribution"].push(`Install ${airDist.registers} registers.`);
+  if (airDist.supplyTags) sections["Air Distribution"].push(`Install ${airDist.supplyTags} supply air terminals (S-# tags).`);
+  if (airDist.returnTags) sections["Air Distribution"].push(`Install ${airDist.returnTags} return air terminals (R-# tags).`);
 
   return Object.entries(sections).map(([section, lines]) => `\n--- ${section} ---\n${lines.join("\n")}`).join("\n");
 }
@@ -178,4 +182,5 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
 
