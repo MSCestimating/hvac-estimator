@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with OpenAI integration and clearer scope of work generation
+// HVACEstimator.jsx — upgraded to simulate domain-trained HVAC estimator AI (no external API)
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,46 +35,22 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
-async function generateScopeWithOpenAI(text) {
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4",
-        messages: [
-          {
-            role: "user",
-            content: `You are an HVAC estimator. Based on the following blueprint text, extract the number of RTUs, exhaust fans, diffusers, and zones. Estimate the ductwork in feet. Then write a 3-sentence scope of work based on this data.\n\n${text}`
-          }
-        ],
-        temperature: 0.2
-      })
-    });
-    const data = await response.json();
-    return data.choices[0].message.content;
-  } catch (err) {
-    return "Error generating scope with OpenAI.";
-  }
-}
-
-function simulateScopeParser(text) {
+function simulateDomainHVACEstimator(text) {
   const rtus = (text.match(/RTU\s?-?\d+/gi) || []).length;
-  const fans = (text.match(/EXH\s?FAN|EF[-\s]?\d+/gi) || []).length;
+  const fans = (text.match(/EF[-\s]?\d+|EXH\s?FAN/gi) || []).length;
   const diffusers = (text.match(/diffuser/gi) || []).length;
-  const zones = (text.match(/zone/gi) || []).length || 1;
-  const ductRuns = [...text.matchAll(/(\d{2,4})\s?(ft|')\s?(duct|supply|return)?/gi)];
-  const ductwork = ductRuns.reduce((sum, match) => sum + parseInt(match[1]), 0) || zones * 250 + rtus * 100;
+  const zones = (text.match(/zone\s?-?\d+/gi) || []).length || 1;
+  const ductRefs = [...text.matchAll(/(\d{2,4})\s?(ft|')\s?(duct|supply|return)?/gi)];
+  const ductwork = ductRefs.reduce((sum, match) => sum + parseInt(match[1]), 0) || zones * 250 + rtus * 100;
 
-  return (
-    `Scope of Work:\n` +
-    `- Provide and install ${rtus} RTUs, ${fans} exhaust fans, and ${diffusers} diffusers.\n` +
-    `- Total ductwork estimated at ${ductwork} feet for ${zones} zones.\n` +
-    `- Include all controls, insulation, and terminal devices per plans.`
-  );
+  const scope = [];
+  scope.push(`Furnish and install ${rtus} rooftop units (RTUs) as per mechanical plan.`);
+  scope.push(`Install ${fans} exhaust fans with required duct connections.`);
+  scope.push(`Distribute air through ${diffusers} supply diffusers across ${zones} zones.`);
+  scope.push(`Provide and hang approximately ${ductwork} feet of ductwork including supports and hangers.`);
+  scope.push(`Include insulation, dampers, control wiring, and balancing as specified.`);
+
+  return scope.join("\n");
 }
 
 export default function HVACEstimator() {
@@ -146,15 +122,9 @@ export default function HVACEstimator() {
     const file = e.target.files[0];
     if (!file) return;
     const text = await extractPDFText(file);
+    const summary = simulateDomainHVACEstimator(text);
     setBlueprintText(text);
-
-    if (import.meta.env.VITE_OPENAI_API_KEY) {
-      const gptScope = await generateScopeWithOpenAI(text);
-      setScopeSummary(gptScope);
-    } else {
-      const fallbackScope = simulateScopeParser(text);
-      setScopeSummary(fallbackScope);
-    }
+    setScopeSummary(summary);
   };
 
   const suggestVEOptions = () => {
