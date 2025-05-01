@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with full AI blueprint detection, duct classification, and weight calculation
+// HVACEstimator.jsx with full AI detection, duct weight calc, and editable labor rates
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,27 +35,104 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
-function parseDuctWeight({ lengthFt, widthIn, heightIn, gauge = 26, type = 'rectangular' }) {
-  const gaugeWeights = {
-    26: 0.9, 24: 1.25, 22: 1.6, 20: 2.2 // lbs/ft² for galvanized sheet metal
-  };
-  const gaugeWeight = gaugeWeights[gauge] || 0.9;
-  if (type === 'rectangular') {
-    const areaFt2 = (widthIn / 12 + heightIn / 12) * 2 * lengthFt;
-    return areaFt2 * gaugeWeight;
-  } else if (type === 'spiral') {
-    const diameterFt = widthIn / 12;
-    const areaFt2 = Math.PI * diameterFt * lengthFt;
-    return areaFt2 * gaugeWeight;
+function normalizeFractionalSize(size) {
+  if (!size) return "?";
+  if (size.includes("-")) {
+    const parts = size.split("-");
+    if (parts.length === 2) {
+      const whole = parseInt(parts[0]);
+      const fraction = parts[1] === "1/4" ? 0.25 : parts[1] === "1/2" ? 0.5 : parts[1] === "3/4" ? 0.75 : 0;
+      return (whole + fraction).toFixed(2);
+    }
   }
-  return 0;
+  return size.replace(/[^\d.]/g, "");
+}
+
+function extractHVACDetails(text) {
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
+    const key = tag.split(/[-\s]/)[0].toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
+    size: normalizeFractionalSize(m[1]),
+    type: m[3]?.toUpperCase()
+  }));
+
+  const pipingCounts = pipeSizes.reduce((acc, cur) => {
+    const key = `${cur.size || '?"'} ${cur.type}`;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
+  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
+  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
+  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
+  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
+
+  const airDist = {
+    supplyTags,
+    returnTags,
+    diffusers,
+    grilles,
+    registers,
+    supplyTotal: supplyTags + diffusers,
+    returnTotal: returnTags + grilles + registers
+  };
+
+  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
+  const sizeCounts = deviceSizes.reduce((acc, sz) => {
+    acc[sz] = (acc[sz] || 0) + 1;
+    return acc;
+  }, {});
+
+  const linearFeet = [...text.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/gi)].map(m => parseInt(m[1]));
+  const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
+
+  return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
+}
+
+function calculateLabor(counts, laborRates) {
+  let totalHours = 0;
+  let totalCost = 0;
+  const breakdown = [];
+
+  const add = (label, qty, hrs) => {
+    const hrsTotal = qty * hrs;
+    const cost = hrsTotal * laborRates.ratePerHour;
+    totalHours += hrsTotal;
+    totalCost += cost;
+    breakdown.push({ label, qty, hrsPerUnit: hrs, hrsTotal, cost });
+  };
+
+  add('Ductwork (ft)', counts.linearTakeoff, laborRates.duct);
+  Object.entries(counts.pipingCounts).forEach(([type, qty]) => add(`Pipe ${type}`, qty, laborRates.pipe));
+  Object.entries(counts.equipmentCounts).forEach(([type, qty]) => add(`${type}`, qty, laborRates[type] || 2));
+
+  return { totalHours, totalCost, breakdown };
 }
 
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
+  const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
-  const [aiDuctEstimate, setAiDuctEstimate] = useState(null);
+  const [laborRates, setLaborRates] = useState({
+    ratePerHour: 55,
+    duct: 0.1,
+    pipe: 0.15,
+    RTU: 5,
+    VAV: 2.5,
+    EF: 1.5,
+    FCU: 3,
+    MAU: 4,
+    AHU: 6,
+    HP: 3,
+    COND: 2
+  });
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
@@ -78,20 +155,12 @@ export default function HVACEstimator() {
     const file = e.target.files[0];
     if (!file) return;
     const text = await extractPDFText(file);
+    const parsed = extractHVACDetails(text);
     setBlueprintText(text);
-
-    // Mocked duct detection
-    const sampleDucts = [
-      { lengthFt: 25, widthIn: 18, heightIn: 10, gauge: 26, type: 'rectangular', flow: 'Supply' },
-      { lengthFt: 15, widthIn: 14, heightIn: 8, gauge: 26, type: 'rectangular', flow: 'Return' },
-      { lengthFt: 10, widthIn: 12, heightIn: 0, gauge: 26, type: 'spiral', flow: 'Exhaust' }
-    ];
-    const results = sampleDucts.map(duct => ({
-      ...duct,
-      weightLbs: parseDuctWeight(duct).toFixed(2)
-    }));
-    setAiDuctEstimate(results);
+    setCounts(parsed);
   };
+
+  const labor = counts ? calculateLabor(counts, laborRates) : null;
 
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
@@ -106,20 +175,39 @@ export default function HVACEstimator() {
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
-      {aiDuctEstimate && (
-        <div style={{ marginTop: "2rem", background: "#f5f5f5", padding: "1rem" }}>
-          <h4>🔍 AI Detected Duct Paths</h4>
+      {counts && (
+        <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>📊 Scope Breakdown:</h4>
           <ul>
-            {aiDuctEstimate.map((duct, idx) => (
-              <li key={idx}>
-                <strong>{duct.flow}</strong> — {duct.type} — {duct.lengthFt} ft × {duct.widthIn}" {duct.heightIn ? `× ${duct.heightIn}"` : ''} → <strong>{duct.weightLbs} lbs</strong>
-              </li>
-            ))}
+            <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
+            <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
+            <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
+            <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
+            <li><strong>Registers:</strong> {counts.airDist.registers}</li>
           </ul>
+          <h5>🔧 Equipment</h5>
+          <ul>
+            {Object.entries(counts.equipmentCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+          <h5>📐 Duct & Pipe Lengths</h5>
+          <p><strong>Total Estimated Linear Footage:</strong> {counts.linearTakeoff} feet</p>
         </div>
       )}
 
-      <h4>Raw Extracted Text</h4>
+      {labor && (
+        <div style={{ background: "#e8f4f8", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>🧑‍🔧 Labor Estimate</h4>
+          <ul>
+            {labor.breakdown.map((item, i) => (
+              <li key={i}>{item.label}: {item.qty} × {item.hrsPerUnit} hrs = {item.hrsTotal.toFixed(2)} hrs (${item.cost.toFixed(2)})</li>
+            ))}
+          </ul>
+          <p><strong>Total Hours:</strong> {labor.totalHours.toFixed(2)} hrs</p>
+          <p><strong>Total Labor Cost:</strong> ${labor.totalCost.toFixed(2)}</p>
+        </div>
+      )}
+
+      <h4>Raw Extracted Text (first 1000 chars)</h4>
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
     </div>
   );
