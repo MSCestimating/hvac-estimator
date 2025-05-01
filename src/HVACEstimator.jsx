@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with air device size detection
+// HVACEstimator.jsx with linear takeoff detection for duct/pipe lengths
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -89,7 +89,10 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  return { equipmentCounts, airDist, pipingCounts, sizeCounts };
+  const linearFeet = [...text.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/gi)].map(m => parseInt(m[1]));
+  const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
+
+  return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
 }
 
 export default function HVACEstimator() {
@@ -168,6 +171,8 @@ export default function HVACEstimator() {
               <li key={size}><strong>{size}</strong>: {count}</li>
             ))}
           </ul>
+          <h4>📏 Estimated Linear Footage:</h4>
+          <p><strong>Total:</strong> {counts.linearTakeoff} feet</p>
         </div>
       )}
 
