@@ -133,5 +133,14 @@ function extractHVACDetails(text) {
     ductWeight: totalDuctWeight
   };
 }
-export function HVACEstimator() {
+export default function HVACEstimator() {
+  // your component logic...
+  return (
+    <div>
+      <h1>HVAC Estimator</h1>
+      {/* your existing UI here */}
+    </div>
+  );
+}
+
 
