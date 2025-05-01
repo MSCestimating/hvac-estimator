@@ -1,4 +1,4 @@
-// HVACEstimator.jsx — upgraded to simulate domain-trained HVAC estimator AI (no external API)
+// HVACEstimator.jsx — with enhanced tag detection for equipment summary
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,22 +35,44 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
+function extractMechanicalTags(text) {
+  return {
+    rtus: (text.match(/RTU[-\s]?\d+/gi) || []).length,
+    ahus: (text.match(/AHU[-\s]?\d+/gi) || []).length,
+    fans: (text.match(/EF[-\s]?\d+|EXH FAN[-\s]?\d+|SF[-\s]?\d+|SUP FAN[-\s]?\d+/gi) || []).length,
+    ervs: (text.match(/ERV[-\s]?\d+|HRV[-\s]?\d+/gi) || []).length,
+    vavs: (text.match(/VAV[-\s]?\d+/gi) || []).length,
+    fcus: (text.match(/FCU[-\s]?\d+/gi) || []).length,
+    maus: (text.match(/MAU[-\s]?\d+/gi) || []).length,
+    doas: (text.match(/DOAS[-\s]?\d+/gi) || []).length,
+    diffusers: (text.match(/DIFF[-\s]?\d+|diffuser/gi) || []).length
+  };
+}
+
+function generateTagSummary(counts) {
+  const entries = Object.entries(counts).filter(([_, v]) => v > 0);
+  if (entries.length === 0) return "No mechanical tags detected.";
+  return entries.map(([k, v]) => `${v} ${k.toUpperCase()}`).join(", ");
+}
+
 function simulateDomainHVACEstimator(text) {
-  const rtus = (text.match(/RTU\s?-?\d+/gi) || []).length;
-  const fans = (text.match(/EF[-\s]?\d+|EXH\s?FAN/gi) || []).length;
-  const diffusers = (text.match(/diffuser/gi) || []).length;
+  const counts = extractMechanicalTags(text);
   const zones = (text.match(/zone\s?-?\d+/gi) || []).length || 1;
   const ductRefs = [...text.matchAll(/(\d{2,4})\s?(ft|')\s?(duct|supply|return)?/gi)];
-  const ductwork = ductRefs.reduce((sum, match) => sum + parseInt(match[1]), 0) || zones * 250 + rtus * 100;
+  const ductwork = ductRefs.reduce((sum, match) => sum + parseInt(match[1]), 0) || zones * 250 + counts.rtus * 100;
 
   const scope = [];
-  scope.push(`Furnish and install ${rtus} rooftop units (RTUs) as per mechanical plan.`);
-  scope.push(`Install ${fans} exhaust fans with required duct connections.`);
-  scope.push(`Distribute air through ${diffusers} supply diffusers across ${zones} zones.`);
-  scope.push(`Provide and hang approximately ${ductwork} feet of ductwork including supports and hangers.`);
-  scope.push(`Include insulation, dampers, control wiring, and balancing as specified.`);
+  if (counts.rtus) scope.push(`Install ${counts.rtus} Rooftop Units.`);
+  if (counts.fans) scope.push(`Install ${counts.fans} supply and exhaust fans.`);
+  if (counts.vavs) scope.push(`Install ${counts.vavs} VAV boxes.`);
+  if (counts.diffusers) scope.push(`Distribute air using ${counts.diffusers} diffusers.`);
+  scope.push(`Provide and hang ${ductwork} ft of ductwork across ${zones} zones.`);
+  scope.push(`Include insulation, balancing, and controls per plans.`);
 
-  return scope.join("\n");
+  return {
+    summaryText: scope.join("\n"),
+    tagSummary: generateTagSummary(counts)
+  };
 }
 
 export default function HVACEstimator() {
@@ -59,6 +81,7 @@ export default function HVACEstimator() {
   const [quoteItems, setQuoteItems] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [scopeSummary, setScopeSummary] = useState("");
+  const [equipmentSummary, setEquipmentSummary] = useState("");
   const [blueprintText, setBlueprintText] = useState("");
   const [veSuggestions, setVeSuggestions] = useState([]);
   const [laborInputs, setLaborInputs] = useState({
@@ -91,20 +114,6 @@ export default function HVACEstimator() {
     alert("Saved to Firebase!");
   };
 
-  const handleQuoteUpload = async (e) => {
-    const files = Array.from(e.target.files);
-    if (!selectedCategory || files.length === 0) return alert("Select category + file");
-    const added = files.map((f, i) => ({
-      description: `${selectedCategory} - Quote ${i + 1}`,
-      qty: 1,
-      unitPrice: 5000 + i * 500,
-      vendor: "Uploaded",
-      status: "Received",
-      leadTime: 4
-    }));
-    setQuoteItems([...quoteItems, ...added]);
-  };
-
   const extractPDFText = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -122,9 +131,10 @@ export default function HVACEstimator() {
     const file = e.target.files[0];
     if (!file) return;
     const text = await extractPDFText(file);
-    const summary = simulateDomainHVACEstimator(text);
+    const parsed = simulateDomainHVACEstimator(text);
     setBlueprintText(text);
-    setScopeSummary(summary);
+    setScopeSummary(parsed.summaryText);
+    setEquipmentSummary(parsed.tagSummary);
   };
 
   const suggestVEOptions = () => {
@@ -155,6 +165,9 @@ export default function HVACEstimator() {
 
       <h3>Blueprint Upload</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
+      <h4>Detected Equipment:</h4>
+      <pre>{equipmentSummary}</pre>
+      <h4>Scope of Work:</h4>
       <pre style={{ background: "#f8f8f8", padding: "1rem" }}>{scopeSummary}</pre>
 
       <textarea rows="6" value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%", marginBottom: "1rem" }} />
