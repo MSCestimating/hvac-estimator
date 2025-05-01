@@ -136,3 +136,5 @@ function extractHVACDetails(text) {
 
 // UI logic continues as-is (unchanged)
 // Ensure that your render section uses counts.ductSizeWeightMap and counts.ductWeight to display data
+
+export default extractHVACDetails;
