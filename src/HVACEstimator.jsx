@@ -1,5 +1,4 @@
-// Cleaned FULL HVACEstimator.jsx with Labor Calculation Integration
-
+// HVACEstimator.jsx updated to fix FAN tag and improve duct/pipe length detection
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -50,30 +49,12 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const cleanText = text.toUpperCase();
-
-  const tagMap = {
-    RTU: /\bRTU[-\s]?\d+\b/g,
-    VAV: /\bVAV[-\s]?\d+\b/g,
-    EF: /\bEF[-\s]?\d+\b/g,
-    EXFAN: /\bEX(FAN)?[-\s]?\d+\b/g,
-    FCU: /\bFCU[-\s]?\d+\b/g,
-    MAU: /\bMAU[-\s]?\d+\b/g,
-    DOAS: /\bDOAS[-\s]?\d+\b/g,
-    AHU: /\bAHU[-\s]?\d+\b/g,
-    HP: /\bHP[-\s]?\d+\b/g,
-    COND: /\bCOND[-\s]?\d+\b/g,
-    OA: /\b(OA|O)[-\s]?\d+\b/g,
-    FD: /\bFD[-\s]?\d+\b/g,
-    SD: /\bSD[-\s]?\d+\b/g,
-    CTRL: /\b(CTRL|BMS)[-\s]?\d*\b/g
-  };
-
-  const equipmentCounts = {};
-  for (const [key, regex] of Object.entries(tagMap)) {
-    const matches = cleanText.match(regex);
-    if (matches) equipmentCounts[key] = matches.length;
-  }
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND|FAN[-\s]?\d+)\b/gi)].map(m => m[0]);
+  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
+    const key = tag.split(/[-\s]/)[0].toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
     size: normalizeFractionalSize(m[1]),
@@ -86,11 +67,11 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const supplyTags = (cleanText.match(/\bS[-\s]?\d+\b/g) || []).length;
-  const returnTags = (cleanText.match(/\bR[-\s]?\d+\b/g) || []).length;
-  const diffusers = (cleanText.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/g) || []).length;
-  const grilles = (cleanText.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/g) || []).length;
-  const registers = (cleanText.match(/\b(REG|REGISTER(S)?)\b/g) || []).length;
+  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
+  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
+  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
+  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
+  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
 
   const airDist = {
     supplyTags,
@@ -102,16 +83,14 @@ function extractHVACDetails(text) {
     returnTotal: returnTags + grilles + registers
   };
 
-  const deviceSizes = [...cleanText.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
+  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
   const sizeCounts = deviceSizes.reduce((acc, sz) => {
     acc[sz] = (acc[sz] || 0) + 1;
     return acc;
   }, {});
 
-  const ductMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?\bDUCT\b/g)].map(m => parseInt(m[1]));
-  const pipeMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?\bPIPE\b/g)].map(m => parseInt(m[1]));
-  const dryerExhaustMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DRYER VENT|DRYER EXHAUST)\b/g)].map(m => parseInt(m[1]));
-  const makeupAirMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(MAKE[-\s]?UP AIR|MUA|MAU)\b/g)].map(m => parseInt(m[1]));
+  const ductMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DUCT)\b/gi)].map(m => parseInt(m[1]));
+  const pipeMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(PIPE)\b/gi)].map(m => parseInt(m[1]));
 
   return {
     equipmentCounts,
@@ -119,74 +98,32 @@ function extractHVACDetails(text) {
     pipingCounts,
     sizeCounts,
     ductLength: ductMentions.reduce((a, b) => a + b, 0),
-    pipeLength: pipeMentions.reduce((a, b) => a + b, 0),
-    dryerExhaustLength: dryerExhaustMentions.reduce((a, b) => a + b, 0),
-    makeupAirLength: makeupAirMentions.reduce((a, b) => a + b, 0)
+    pipeLength: pipeMentions.reduce((a, b) => a + b, 0)
   };
 }
 
-function calculateLabor(counts, laborRates, ratePerHour) {
-  let totalHours = 0;
-  let totalCost = 0;
-  const laborBreakdown = [];
-
-  const add = (label, qty, hoursPerUnit) => {
-    const hours = qty * hoursPerUnit;
-    const cost = hours * ratePerHour;
-    totalHours += hours;
-    totalCost += cost;
-    laborBreakdown.push({ label, qty, hoursPerUnit, hours, cost });
-  };
-
-  add('Ductwork (ft)', counts.ductLength, laborRates.duct);
-  add('Piping (ft)', counts.pipeLength, laborRates.pipe);
-  add('Dryer Exhaust (ft)', counts.dryerExhaustLength, laborRates.dryer);
-  add('Make-Up Air (ft)', counts.makeupAirLength, laborRates.makeup);
-
-  Object.entries(counts.equipmentCounts).forEach(([key, val]) => {
-    const rate = laborRates[key] || 0;
-    add(`${key} (qty)`, val, rate);
-  });
-
-  return { laborBreakdown, totalHours, totalCost };
-}
-
-function HVACEstimator() {
+export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
-  const [laborRates, setLaborRates] = useState({
-    duct: 0.08,
-    pipe: 0.12,
-    dryer: 0.1,
-    makeup: 0.1,
-    RTU: 6,
-    VAV: 2.5,
-    EF: 2,
-    EXFAN: 2,
-    FCU: 4,
-    MAU: 5
-  });
-  const [ratePerHour, setRatePerHour] = useState(55);
 
   useEffect(() => {
-    onAuthStateChanged(auth, setUser);
+    onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
   }, []);
 
   const extractPDFText = async (file) => {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = "";
-  for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const strings = content.items.map((item) => item.str).join(" ");
-    fullText += strings + "
-";
-  }
-  return fullText;
-};
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item) => item.str).join(" ");
+      fullText += strings + "\n";
+    }
+    return fullText;
+  };
 
   const handleBlueprintUpload = async (e) => {
     const file = e.target.files[0];
@@ -196,8 +133,6 @@ function HVACEstimator() {
     setBlueprintText(text);
     setCounts(parsed);
   };
-
-  const labor = counts ? calculateLabor(counts, laborRates, ratePerHour) : null;
 
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
@@ -232,8 +167,6 @@ function HVACEstimator() {
           <ul>
             <li><strong>Duct Length:</strong> {counts.ductLength} feet</li>
             <li><strong>Pipe Length:</strong> {counts.pipeLength} feet</li>
-            <li><strong>Dryer Exhaust Length:</strong> {counts.dryerExhaustLength} feet</li>
-            <li><strong>Make-Up Air Length:</strong> {counts.makeupAirLength} feet</li>
           </ul>
           <h5>🛠️ Pipe Sizes</h5>
           <ul>
@@ -246,27 +179,8 @@ function HVACEstimator() {
         </div>
       )}
 
-      {labor && (
-        <div style={{ background: "#e8f4f8", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
-          <h4>🧑‍🔧 Labor Estimate</h4>
-          <ul>
-            {labor.laborBreakdown.map((item, i) => (
-              <li key={i}>{item.label}: {item.qty} × {item.hoursPerUnit} hrs = {item.hours.toFixed(2)} hrs (${item.cost.toFixed(2)})</li>
-            ))}
-          </ul>
-          <p><strong>Total Hours:</strong> {labor.totalHours.toFixed(2)} hrs</p>
-          <p><strong>Total Labor Cost:</strong> ${labor.totalCost.toFixed(2)}</p>
-        </div>
-      )}
-
       <h4>Raw Extracted Text (first 1000 chars)</h4>
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
     </div>
   );
-
-}}
-
-export default HVACEstimator;
-
-
-
+}
