@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with equipment, air distribution, and piping breakdown counts
+// HVACEstimator.jsx with air device size detection
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -83,7 +83,13 @@ function extractHVACDetails(text) {
     returnTotal: returnTags + grilles + registers
   };
 
-  return { equipmentCounts, airDist, pipingCounts };
+  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
+  const sizeCounts = deviceSizes.reduce((acc, sz) => {
+    acc[sz] = (acc[sz] || 0) + 1;
+    return acc;
+  }, {});
+
+  return { equipmentCounts, airDist, pipingCounts, sizeCounts };
 }
 
 export default function HVACEstimator() {
@@ -156,6 +162,12 @@ export default function HVACEstimator() {
               <li key={key}><strong>{key}</strong>: {value}</li>
             ))}
           </ul>
+          <h4>📐 Device Sizes:</h4>
+          <ul>
+            {Object.entries(counts.sizeCounts).map(([size, count]) => (
+              <li key={size}><strong>{size}</strong>: {count}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -164,6 +176,3 @@ export default function HVACEstimator() {
     </div>
   );
 }
-
-
-
