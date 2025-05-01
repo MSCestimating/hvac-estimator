@@ -182,7 +182,7 @@ function HVACEstimator() {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const strings = content.items.map((item) => item.str).join(" ");
-      fullText += strings + "
+      fullText += strings + "\n"
 ";
     }
     return fullText;
