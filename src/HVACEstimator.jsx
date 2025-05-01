@@ -182,7 +182,8 @@ function HVACEstimator() {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const strings = content.items.map((item) => item.str).join(" ");
-      fullText += strings + "\n";
+      fullText += strings + "
+";
     }
     return fullText;
   };
@@ -262,9 +263,7 @@ function HVACEstimator() {
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
     </div>
   );
-}, []);
-
-  return (
+return (
     <div style={{ padding: "2rem" }}>
       <h1>HVAC Estimator</h1>
       {user ? (
