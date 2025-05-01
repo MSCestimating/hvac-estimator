@@ -153,10 +153,116 @@ function calculateLabor(counts, laborRates, ratePerHour) {
 
 function HVACEstimator() {
   const [user, setUser] = useState(null);
+  const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
+  const [counts, setCounts] = useState(null);
+  const [blueprintText, setBlueprintText] = useState("");
+  const [laborRates, setLaborRates] = useState({
+    duct: 0.08,
+    pipe: 0.12,
+    dryer: 0.1,
+    makeup: 0.1,
+    RTU: 6,
+    VAV: 2.5,
+    EF: 2,
+    EXFAN: 2,
+    FCU: 4,
+    MAU: 5
+  });
+  const [ratePerHour, setRatePerHour] = useState(55);
 
   useEffect(() => {
     onAuthStateChanged(auth, setUser);
   }, []);
+
+  const extractPDFText = async (file) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item) => item.str).join(" ");
+      fullText += strings + "\n";
+    }
+    return fullText;
+  };
+
+  const handleBlueprintUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await extractPDFText(file);
+    const parsed = extractHVACDetails(text);
+    setBlueprintText(text);
+    setCounts(parsed);
+  };
+
+  const labor = counts ? calculateLabor(counts, laborRates, ratePerHour) : null;
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+      <h1>HVAC Estimator</h1>
+
+      {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>}
+
+      <input placeholder="Project Name" value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} />
+      <input placeholder="Location" value={project.location} onChange={e => setProject({ ...project, location: e.target.value })} />
+      <input placeholder="Square Footage" value={project.squareFootage} onChange={e => setProject({ ...project, squareFootage: e.target.value })} />
+      <input placeholder="Floors" value={project.floors} onChange={e => setProject({ ...project, floors: e.target.value })} />
+
+      <h3>Upload Blueprint PDF</h3>
+      <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
+
+      {counts && (
+        <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>📊 Scope Breakdown:</h4>
+          <h5>🔹 Air Distribution</h5>
+          <ul>
+            <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
+            <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
+            <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
+            <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
+            <li><strong>Registers:</strong> {counts.airDist.registers}</li>
+          </ul>
+          <h5>🔧 Equipment</h5>
+          <ul>
+            {Object.entries(counts.equipmentCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+          <h5>📐 Duct & Pipe Lengths</h5>
+          <ul>
+            <li><strong>Duct Length:</strong> {counts.ductLength} feet</li>
+            <li><strong>Pipe Length:</strong> {counts.pipeLength} feet</li>
+            <li><strong>Dryer Exhaust Length:</strong> {counts.dryerExhaustLength} feet</li>
+            <li><strong>Make-Up Air Length:</strong> {counts.makeupAirLength} feet</li>
+          </ul>
+          <h5>🛠️ Pipe Sizes</h5>
+          <ul>
+            {Object.entries(counts.pipingCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+          <h5>📏 Device Sizes</h5>
+          <ul>
+            {Object.entries(counts.sizeCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {labor && (
+        <div style={{ background: "#e8f4f8", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>🧑‍🔧 Labor Estimate</h4>
+          <ul>
+            {labor.laborBreakdown.map((item, i) => (
+              <li key={i}>{item.label}: {item.qty} × {item.hoursPerUnit} hrs = {item.hours.toFixed(2)} hrs (${item.cost.toFixed(2)})</li>
+            ))}
+          </ul>
+          <p><strong>Total Hours:</strong> {labor.totalHours.toFixed(2)} hrs</p>
+          <p><strong>Total Labor Cost:</strong> ${labor.totalCost.toFixed(2)}</p>
+        </div>
+      )}
+
+      <h4>Raw Extracted Text (first 1000 chars)</h4>
+      <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
+    </div>
+  );
+}, []);
 
   return (
     <div style={{ padding: "2rem" }}>
