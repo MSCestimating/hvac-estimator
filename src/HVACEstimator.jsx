@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with corrected equipment tags and no canvas
+// HVACEstimator.jsx with labor calculator, blueprint parsing, and no canvas
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,30 +49,12 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const cleanText = text.toUpperCase();
-
-  const tagMap = {
-    RTU: /\bRTU[-\s]?\d+\b/g,
-    VAV: /\bVAV[-\s]?\d+\b/g,
-    EF: /\bEF[-\s]?\d+\b/g,
-    EXFAN: /\bEX(FAN)?[-\s]?\d+\b/g,
-    FCU: /\bFCU[-\s]?\d+\b/g,
-    MAU: /\bMAU[-\s]?\d+\b/g,
-    DOAS: /\bDOAS[-\s]?\d+\b/g,
-    AHU: /\bAHU[-\s]?\d+\b/g,
-    HP: /\bHP[-\s]?\d+\b/g,
-    COND: /\bCOND[-\s]?\d+\b/g,
-    OA: /\b(OA|O)[-\s]?\d+\b/g,
-    FD: /\bFD[-\s]?\d+\b/g,
-    SD: /\bSD[-\s]?\d+\b/g,
-    CTRL: /\b(CTRL|BMS)[-\s]?\d*\b/g
-  };
-
-  const equipmentCounts = {};
-  for (const [key, regex] of Object.entries(tagMap)) {
-    const matches = cleanText.match(regex);
-    if (matches) equipmentCounts[key] = matches.length;
-  }
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
+    const key = tag.split(/[-\s]/)[0].toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
     size: normalizeFractionalSize(m[1]),
@@ -85,11 +67,11 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const supplyTags = (cleanText.match(/\bS[-\s]?\d+\b/g) || []).length;
-  const returnTags = (cleanText.match(/\bR[-\s]?\d+\b/g) || []).length;
-  const diffusers = (cleanText.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/g) || []).length;
-  const grilles = (cleanText.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/g) || []).length;
-  const registers = (cleanText.match(/\b(REG|REGISTER(S)?)\b/g) || []).length;
+  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
+  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
+  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
+  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
+  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
 
   const airDist = {
     supplyTags,
@@ -101,16 +83,45 @@ function extractHVACDetails(text) {
     returnTotal: returnTags + grilles + registers
   };
 
-  const deviceSizes = [...cleanText.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
+  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
   const sizeCounts = deviceSizes.reduce((acc, sz) => {
     acc[sz] = (acc[sz] || 0) + 1;
     return acc;
   }, {});
 
-  const linearFeet = [...cleanText.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/g)].map(m => parseInt(m[1]));
-  const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
+  const ductMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DUCT)\b/gi)].map(m => parseInt(m[1]));
+  const pipeMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(PIPE)\b/gi)].map(m => parseInt(m[1]));
 
-  return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
+  return {
+    equipmentCounts,
+    airDist,
+    pipingCounts,
+    sizeCounts,
+    ductLength: ductMentions.reduce((a, b) => a + b, 0),
+    pipeLength: pipeMentions.reduce((a, b) => a + b, 0)
+  };
+}
+
+function calculateLabor(counts, laborRates, hourlyRate) {
+  const labor = [];
+  let totalCost = 0;
+
+  const addItem = (label, quantity, hoursPerUnit) => {
+    const hours = quantity * hoursPerUnit;
+    const cost = hours * hourlyRate;
+    totalCost += cost;
+    labor.push({ label, quantity, hours, cost });
+  };
+
+  addItem("Ductwork (ft)", counts.ductLength, laborRates.duct);
+  addItem("Piping (ft)", counts.pipeLength, laborRates.pipe);
+
+  Object.entries(counts.equipmentCounts).forEach(([key, qty]) => {
+    const rate = laborRates[key] || 0;
+    addItem(`${key} Units`, qty, rate);
+  });
+
+  return { labor, totalCost };
 }
 
 export default function HVACEstimator() {
@@ -118,6 +129,20 @@ export default function HVACEstimator() {
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
+  const [hourlyRate, setHourlyRate] = useState(55);
+  const [laborRates, setLaborRates] = useState({
+    duct: 0.08,
+    pipe: 0.12,
+    RTU: 6,
+    EF: 2,
+    FCU: 4,
+    VAV: 2.5,
+    AHU: 6,
+    MAU: 5,
+    DOAS: 6,
+    HP: 3,
+    COND: 3
+  });
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
@@ -145,10 +170,11 @@ export default function HVACEstimator() {
     setCounts(parsed);
   };
 
+  const labor = counts ? calculateLabor(counts, laborRates, hourlyRate) : null;
+
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
       <h1>HVAC Estimator</h1>
-
       {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>}
 
       <input placeholder="Project Name" value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} />
@@ -161,36 +187,44 @@ export default function HVACEstimator() {
 
       {counts && (
         <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
-          <h4>📊 Visual Count Breakdown:</h4>
+          <h4>📊 Scope Breakdown:</h4>
+          <h5>🔹 Air Distribution</h5>
           <ul>
             <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
             <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
-            <li><strong>Total Supply Devices:</strong> {counts.airDist.supplyTotal}</li>
             <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
             <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
             <li><strong>Registers:</strong> {counts.airDist.registers}</li>
-            <li><strong>Total Return Devices:</strong> {counts.airDist.returnTotal}</li>
           </ul>
-          <h4>🧰 Equipment Tags:</h4>
+          <h5>🔧 Equipment</h5>
           <ul>
-            {Object.entries(counts.equipmentCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
+            {Object.entries(counts.equipmentCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+          <h5>📐 Duct & Pipe Lengths</h5>
+          <ul>
+            <li><strong>Duct Length:</strong> {counts.ductLength} feet</li>
+            <li><strong>Pipe Length:</strong> {counts.pipeLength} feet</li>
+          </ul>
+          <h5>🛠️ Pipe Sizes</h5>
+          <ul>
+            {Object.entries(counts.pipingCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+          <h5>📏 Device Sizes</h5>
+          <ul>
+            {Object.entries(counts.sizeCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {labor && (
+        <div style={{ background: "#e8f4f8", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>🧑‍🔧 Labor Calculation</h4>
+          <ul>
+            {labor.labor.map((item, i) => (
+              <li key={i}>{item.label}: {item.quantity} units = {item.hours.toFixed(2)} hrs → ${item.cost.toFixed(2)}</li>
             ))}
           </ul>
-          <h4>🛠️ Piping Runs:</h4>
-          <ul>
-            {Object.entries(counts.pipingCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
-            ))}
-          </ul>
-          <h4>📐 Device Sizes:</h4>
-          <ul>
-            {Object.entries(counts.sizeCounts).map(([size, count]) => (
-              <li key={size}><strong>{size}</strong>: {count}</li>
-            ))}
-          </ul>
-          <h4>📏 Estimated Linear Footage:</h4>
-          <p><strong>Total:</strong> {counts.linearTakeoff} feet</p>
+          <strong>Total Labor Cost: ${labor.totalCost.toFixed(2)}</strong>
         </div>
       )}
 
