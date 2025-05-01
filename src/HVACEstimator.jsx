@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with enhanced detection for tags, duct sizes, and pipe sizes
+// HVACEstimator.jsx with enhanced tag, duct, and pipe detection from blueprint OCR
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -36,35 +36,31 @@ const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
 function extractHVACDetails(text) {
-  const counts = {
-    rtus: (text.match(/\bRTU[-\s]?\d+/gi) || []).length,
-    ahus: (text.match(/\bAHU[-\s]?\d+/gi) || []).length,
-    fans: (text.match(/\bEF[-\s]?\d+|EXH FAN[-\s]?\d+|SF[-\s]?\d+|FAN[-\s]?\d+/gi) || []).length,
-    vavs: (text.match(/\bVAV[-\s]?\d+/gi) || []).length,
-    fcus: (text.match(/\bFCU[-\s]?\d+/gi) || []).length,
-    diffusers: (text.match(/\bDIFF[-\s]?\d+|\bDIFFUSER\b/gi) || []).length
-  };
-
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|S|R|FCU|VAV|AHU|DOAS|MAU)[-\s]?\d+\b/gi)].map(m => m[0]);
   const ductSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×]\s?(\d{1,3})\b/g)].map(m => ({ w: +m[1], h: +m[2] }));
-  const pipeSizes = [...text.matchAll(/(\d{1,2}[-/]?\d{0,2})?\s?\"?\s?(GAS|CW|COND|VTR|HW)/gi)].map(m => ({ size: m[1], type: m[2].toUpperCase() }));
+  const pipeSizes = [...text.matchAll(/(\d{1,2}[-/]?\d{0,2})?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({ size: m[1], type: m[2].toUpperCase() }));
   const lengths = [...text.matchAll(/(\d{1,4})\s?(FT|FEET|FOOT|')/gi)].map(m => parseInt(m[1]));
 
-  return { counts, ductSizes, pipeSizes, lengths };
+  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
+    const key = tag.split(/[-\s]/)[0].toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return { equipmentCounts, equipmentTags, ductSizes, pipeSizes, lengths };
 }
 
 function summarizeScope(data) {
-  const { counts, ductSizes, pipeSizes, lengths } = data;
+  const { equipmentCounts, ductSizes, pipeSizes, lengths } = data;
   const scope = [];
-  if (counts.rtus) scope.push(`Install ${counts.rtus} Rooftop Units.`);
-  if (counts.ahus) scope.push(`Install ${counts.ahus} Air Handlers.`);
-  if (counts.fans) scope.push(`Install ${counts.fans} fans (supply/exhaust).`);
-  if (counts.vavs) scope.push(`Install ${counts.vavs} VAV boxes.`);
-  if (counts.fcus) scope.push(`Install ${counts.fcus} Fan Coil Units.`);
-  if (counts.diffusers) scope.push(`Install ${counts.diffusers} diffusers.`);
+
+  for (const [key, value] of Object.entries(equipmentCounts)) {
+    scope.push(`Install ${value} ${key} units.`);
+  }
 
   if (ductSizes.length > 0) {
     const mostCommonDuct = ductSizes.sort((a, b) => ductSizes.filter(d => d.w === b.w && d.h === b.h).length - ductSizes.filter(d => d.w === a.w && d.h === a.h).length)[0];
-    scope.push(`Install approx. ${lengths.reduce((a, b) => a + b, 0)} ft of ductwork (e.g., ${mostCommonDuct.w}x${mostCommonDuct.h}).`);
+    scope.push(`Install approx. ${lengths.reduce((a, b) => a + b, 0)} ft of ductwork (common: ${mostCommonDuct.w}x${mostCommonDuct.h}).`);
   }
 
   if (pipeSizes.length > 0) {
@@ -127,7 +123,7 @@ export default function HVACEstimator() {
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
     setScopeSummary(summarizeScope(parsed));
-    const tagList = Object.entries(parsed.counts).filter(([_, v]) => v > 0).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(", ");
+    const tagList = Object.entries(parsed.equipmentCounts).map(([k, v]) => `${v} ${k}`).join(", ");
     setEquipmentSummary(tagList || "No mechanical tags detected.");
   };
 
@@ -156,4 +152,5 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
 
