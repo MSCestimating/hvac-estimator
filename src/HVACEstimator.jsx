@@ -1,4 +1,4 @@
-// HVACEstimator.jsx updated: unify diffuser/grille/register counts under supply/return tags
+// HVACEstimator.jsx with visual breakdown of tag counts
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,70 +49,29 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
-  const ductSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => ({ w: +m[1], h: +m[2] }));
-  const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
-    size: normalizeFractionalSize(m[1]),
-    type: m[3]?.toUpperCase()
-  }));
-  const lengths = [...text.matchAll(/(\d{1,4})\s?(FT|FEET|FOOT|')/gi)].map(m => parseInt(m[1]));
-
-  // Base tag matches
   const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
   const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
-
-  // Legacy device-type matches
-  const legacyDiff = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
-  const legacyGrilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
-  const legacyRegs = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
+  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
+  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
+  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
 
   const airDist = {
-    supplyTags: supplyTags + legacyDiff,
-    returnTags: returnTags + legacyGrilles + legacyRegs
+    supplyTags,
+    returnTags,
+    diffusers,
+    grilles,
+    registers,
+    supplyTotal: supplyTags + diffusers,
+    returnTotal: returnTags + grilles + registers
   };
 
-  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
-    const key = tag.split(/[-\s]/)[0].toUpperCase();
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  return { equipmentCounts, equipmentTags, ductSizes, pipeSizes, lengths, airDist };
-}
-
-function summarizeScope(data) {
-  const { equipmentCounts, ductSizes, pipeSizes, lengths, airDist } = data;
-  const sections = { Equipment: [], Ductwork: [], Piping: [], "Air Distribution": [] };
-
-  for (const [key, value] of Object.entries(equipmentCounts)) {
-    sections.Equipment.push(`Install ${value} ${key} units.`);
-  }
-
-  if (ductSizes.length > 0) {
-    const mostCommonDuct = ductSizes.sort((a, b) => ductSizes.filter(d => d.w === b.w && d.h === b.h).length - ductSizes.filter(d => d.w === a.w && d.h === a.h).length)[0];
-    sections.Ductwork.push(`Install approx. ${lengths.reduce((a, b) => a + b, 0)} ft of ductwork (common size: ${mostCommonDuct.w}x${mostCommonDuct.h}).`);
-  }
-
-  if (pipeSizes.length > 0) {
-    const grouped = pipeSizes.reduce((acc, cur) => {
-      const key = `${cur.size || '?"'} ${cur.type}`;
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    Object.entries(grouped).forEach(([type, count]) => sections.Piping.push(`Install ${count} runs of ${type} piping.`));
-  }
-
-  if (airDist.supplyTags) sections["Air Distribution"].push(`Install ${airDist.supplyTags} supply air terminals.`);
-  if (airDist.returnTags) sections["Air Distribution"].push(`Install ${airDist.returnTags} return air terminals.`);
-
-  return Object.entries(sections).map(([section, lines]) => `\n--- ${section} ---\n${lines.join("\n")}`).join("\n");
+  return { airDist };
 }
 
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
-  const [scopeSummary, setScopeSummary] = useState("");
-  const [equipmentSummary, setEquipmentSummary] = useState("");
+  const [airCounts, setAirCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
 
   useEffect(() => {
@@ -130,22 +89,6 @@ export default function HVACEstimator() {
       fullText += strings + "\n";
     }
 
-    if (fullText.length < 50) {
-      const formData = new FormData();
-      formData.append("apikey", "helloworld");
-      formData.append("isOverlayRequired", "false");
-      formData.append("file", file);
-      formData.append("OCREngine", "2");
-
-      const response = await fetch("https://api.ocr.space/parse/image", {
-        method: "POST",
-        body: formData
-      });
-
-      const result = await response.json();
-      fullText = result.ParsedResults?.[0]?.ParsedText || "";
-    }
-
     return fullText;
   };
 
@@ -155,9 +98,7 @@ export default function HVACEstimator() {
     const text = await extractPDFText(file);
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
-    setScopeSummary(summarizeScope(parsed));
-    const tagList = Object.entries(parsed.equipmentCounts).map(([k, v]) => `${v} ${k}`).join(", ");
-    setEquipmentSummary(tagList || "No mechanical tags detected.");
+    setAirCounts(parsed.airDist);
   };
 
   return (
@@ -174,11 +115,20 @@ export default function HVACEstimator() {
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
-      <h4>Detected Equipment:</h4>
-      <pre>{equipmentSummary}</pre>
-
-      <h4>Scope of Work:</h4>
-      <pre style={{ background: "#f9f9f9", padding: "1rem" }}>{scopeSummary}</pre>
+      {airCounts && (
+        <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>📊 Visual Count Breakdown:</h4>
+          <ul>
+            <li><strong>Supply Tags:</strong> {airCounts.supplyTags}</li>
+            <li><strong>Diffusers:</strong> {airCounts.diffusers}</li>
+            <li><strong>Total Supply Devices:</strong> {airCounts.supplyTotal}</li>
+            <li><strong>Return Tags:</strong> {airCounts.returnTags}</li>
+            <li><strong>Grilles:</strong> {airCounts.grilles}</li>
+            <li><strong>Registers:</strong> {airCounts.registers}</li>
+            <li><strong>Total Return Devices:</strong> {airCounts.returnTotal}</li>
+          </ul>
+        </div>
+      )}
 
       <h4>Raw Extracted Text (first 1000 chars)</h4>
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
