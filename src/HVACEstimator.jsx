@@ -111,9 +111,4 @@ function extractHVACDetails(text) {
   };
 }
 
-function HVACEstimator() {
-  // Existing logic with UI, PDF upload, project info, counts rendering, etc.
-  return <div>HVAC Estimator UI</div>;
-}
-
 export default HVACEstimator;
