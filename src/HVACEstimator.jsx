@@ -151,4 +151,4 @@ function calculateLabor(counts, laborRates, ratePerHour) {
   return { laborBreakdown, totalHours, totalCost };
 }
 
-// Component logic continues here (render UI, useState, etc)...
+export default HVACEstimator;
