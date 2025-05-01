@@ -1,5 +1,5 @@
-// HVACEstimator.jsx with linear takeoff detection for duct/pipe lengths
-import React, { useState, useEffect } from "react";
+// HVACEstimator.jsx with canvas-based PDF rendering for scale calibration
+import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.entry";
@@ -100,10 +100,24 @@ export default function HVACEstimator() {
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
+  const canvasRef = useRef(null);
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
   }, []);
+
+  const renderPDFPageToCanvas = async (file) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    const renderContext = { canvasContext: context, viewport };
+    await page.render(renderContext).promise;
+  };
 
   const extractPDFText = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -121,6 +135,7 @@ export default function HVACEstimator() {
   const handleBlueprintUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    await renderPDFPageToCanvas(file);
     const text = await extractPDFText(file);
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
@@ -140,6 +155,8 @@ export default function HVACEstimator() {
 
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
+
+      <canvas ref={canvasRef} style={{ marginTop: "1rem", border: "1px solid #ccc" }} />
 
       {counts && (
         <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
@@ -181,4 +198,5 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
 
