@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with enhanced tag, duct, and pipe detection from blueprint OCR
+// HVACEstimator.jsx with advanced parsing: fractional sizes, groupings, and improved detection
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,10 +35,26 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
+function normalizeFractionalSize(size) {
+  if (!size) return "?";
+  if (size.includes("-")) {
+    const parts = size.split("-");
+    if (parts.length === 2) {
+      const whole = parseInt(parts[0]);
+      const fraction = parts[1] === "1/4" ? 0.25 : parts[1] === "1/2" ? 0.5 : parts[1] === "3/4" ? 0.75 : 0;
+      return (whole + fraction).toFixed(2);
+    }
+  }
+  return size.replace(/[^\d.]/g, "");
+}
+
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|S|R|FCU|VAV|AHU|DOAS|MAU)[-\s]?\d+\b/gi)].map(m => m[0]);
-  const ductSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×]\s?(\d{1,3})\b/g)].map(m => ({ w: +m[1], h: +m[2] }));
-  const pipeSizes = [...text.matchAll(/(\d{1,2}[-/]?\d{0,2})?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({ size: m[1], type: m[2].toUpperCase() }));
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|S|R|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const ductSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => ({ w: +m[1], h: +m[2] }));
+  const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
+    size: normalizeFractionalSize(m[1]),
+    type: m[3]?.toUpperCase()
+  }));
   const lengths = [...text.matchAll(/(\d{1,4})\s?(FT|FEET|FOOT|')/gi)].map(m => parseInt(m[1]));
 
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
@@ -52,15 +68,15 @@ function extractHVACDetails(text) {
 
 function summarizeScope(data) {
   const { equipmentCounts, ductSizes, pipeSizes, lengths } = data;
-  const scope = [];
+  const sections = { Equipment: [], Ductwork: [], Piping: [] };
 
   for (const [key, value] of Object.entries(equipmentCounts)) {
-    scope.push(`Install ${value} ${key} units.`);
+    sections.Equipment.push(`Install ${value} ${key} units.`);
   }
 
   if (ductSizes.length > 0) {
     const mostCommonDuct = ductSizes.sort((a, b) => ductSizes.filter(d => d.w === b.w && d.h === b.h).length - ductSizes.filter(d => d.w === a.w && d.h === a.h).length)[0];
-    scope.push(`Install approx. ${lengths.reduce((a, b) => a + b, 0)} ft of ductwork (common: ${mostCommonDuct.w}x${mostCommonDuct.h}).`);
+    sections.Ductwork.push(`Install approx. ${lengths.reduce((a, b) => a + b, 0)} ft of ductwork (common size: ${mostCommonDuct.w}x${mostCommonDuct.h}).`);
   }
 
   if (pipeSizes.length > 0) {
@@ -69,10 +85,10 @@ function summarizeScope(data) {
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
-    Object.entries(grouped).forEach(([type, count]) => scope.push(`Install ${count} runs of ${type} piping.`));
+    Object.entries(grouped).forEach(([type, count]) => sections.Piping.push(`Install ${count} runs of ${type} piping.`));
   }
 
-  return scope.join("\n");
+  return Object.entries(sections).map(([section, lines]) => `\n--- ${section} ---\n${lines.join("\n")}`).join("\n");
 }
 
 export default function HVACEstimator() {
@@ -152,5 +168,3 @@ export default function HVACEstimator() {
     </div>
   );
 }
-
-
