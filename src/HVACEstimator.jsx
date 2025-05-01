@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with R/S tag integration for supply and return counts
+// HVACEstimator.jsx updated: unify diffuser/grille/register counts under supply/return tags
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -57,12 +57,18 @@ function extractHVACDetails(text) {
   }));
   const lengths = [...text.matchAll(/(\d{1,4})\s?(FT|FEET|FOOT|')/gi)].map(m => parseInt(m[1]));
 
+  // Base tag matches
+  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
+  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
+
+  // Legacy device-type matches
+  const legacyDiff = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
+  const legacyGrilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
+  const legacyRegs = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
+
   const airDist = {
-    diffusers: (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD|RD)\b/gi) || []).length,
-    grilles: (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length,
-    registers: (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length,
-    supplyTags: (text.match(/\bS[-\s]?\d+\b/gi) || []).length,
-    returnTags: (text.match(/\bR[-\s]?\d+\b/gi) || []).length
+    supplyTags: supplyTags + legacyDiff,
+    returnTags: returnTags + legacyGrilles + legacyRegs
   };
 
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
@@ -96,11 +102,8 @@ function summarizeScope(data) {
     Object.entries(grouped).forEach(([type, count]) => sections.Piping.push(`Install ${count} runs of ${type} piping.`));
   }
 
-  if (airDist.diffusers) sections["Air Distribution"].push(`Install ${airDist.diffusers} diffusers.`);
-  if (airDist.grilles) sections["Air Distribution"].push(`Install ${airDist.grilles} grilles.`);
-  if (airDist.registers) sections["Air Distribution"].push(`Install ${airDist.registers} registers.`);
-  if (airDist.supplyTags) sections["Air Distribution"].push(`Install ${airDist.supplyTags} supply air terminals (S-# tags).`);
-  if (airDist.returnTags) sections["Air Distribution"].push(`Install ${airDist.returnTags} return air terminals (R-# tags).`);
+  if (airDist.supplyTags) sections["Air Distribution"].push(`Install ${airDist.supplyTags} supply air terminals.`);
+  if (airDist.returnTags) sections["Air Distribution"].push(`Install ${airDist.returnTags} return air terminals.`);
 
   return Object.entries(sections).map(([section, lines]) => `\n--- ${section} ---\n${lines.join("\n")}`).join("\n");
 }
