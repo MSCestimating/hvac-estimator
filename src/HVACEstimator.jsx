@@ -1,4 +1,4 @@
-// FULL HVACEstimator.jsx with Labor Calculation Integration and Correct Export
+// Cleaned FULL HVACEstimator.jsx with Labor Calculation Integration
 
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
