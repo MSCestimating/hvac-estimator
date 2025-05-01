@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with canvas-based PDF rendering for scale calibration and correct export
+// HVACEstimator.jsx updated with duct weight calculation and adjustable gauge
 import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -35,20 +35,14 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
-function normalizeFractionalSize(size) {
-  if (!size) return "?";
-  if (size.includes("-")) {
-    const parts = size.split("-");
-    if (parts.length === 2) {
-      const whole = parseInt(parts[0]);
-      const fraction = parts[1] === "1/4" ? 0.25 : parts[1] === "1/2" ? 0.5 : parts[1] === "3/4" ? 0.75 : 0;
-      return (whole + fraction).toFixed(2);
-    }
-  }
-  return size.replace(/[^\d.]/g, "");
-}
+const gaugeFactors = {
+  '26': 0.906,
+  '24': 1.188,
+  '22': 1.531,
+  '20': 2.000
+};
 
-function extractHVACDetails(text) {
+function extractHVACDetails(text, selectedGauge = '26') {
   const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
     const key = tag.split(/[-\s]/)[0].toUpperCase();
@@ -57,49 +51,45 @@ function extractHVACDetails(text) {
   }, {});
 
   const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
-    size: normalizeFractionalSize(m[1]),
+    size: m[1],
     type: m[3]?.toUpperCase()
   }));
 
   const pipingCounts = pipeSizes.reduce((acc, cur) => {
-    const key = `${cur.size || '?"'} ${cur.type}`;
+    const key = `${cur.size || '"?'} ${cur.type}`;
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
 
-  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
-  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
-  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
-  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
-  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
-
-  const airDist = {
-    supplyTags,
-    returnTags,
-    diffusers,
-    grilles,
-    registers,
-    supplyTotal: supplyTags + diffusers,
-    returnTotal: returnTags + grilles + registers
-  };
-
-  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
-  const sizeCounts = deviceSizes.reduce((acc, sz) => {
-    acc[sz] = (acc[sz] || 0) + 1;
+  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => [parseInt(m[1]), parseInt(m[2])]);
+  const sizeCounts = deviceSizes.reduce((acc, [w, h]) => {
+    const label = `${w}x${h}`;
+    acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
 
-  const linearFeet = [...text.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/gi)].map(m => parseInt(m[1]));
-  const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
+  let ductWeight = 0;
+  const gaugeFactor = gaugeFactors[selectedGauge] || 0.906;
+  deviceSizes.forEach(([w, h]) => {
+    const perimeter = 2 * (w + h) / 12; // feet
+    ductWeight += perimeter * gaugeFactor;
+  });
 
-  return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
+  return {
+    equipmentCounts,
+    pipingCounts,
+    sizeCounts,
+    ductWeight: parseFloat(ductWeight.toFixed(2))
+  };
 }
 
-function HVACEstimator() {
+export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
+  const [gauge, setGauge] = useState("26");
+  const canvasRef = useRef(null);
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
@@ -122,7 +112,7 @@ function HVACEstimator() {
     const file = e.target.files[0];
     if (!file) return;
     const text = await extractPDFText(file);
-    const parsed = extractHVACDetails(text);
+    const parsed = extractHVACDetails(text, gauge);
     setBlueprintText(text);
     setCounts(parsed);
   };
@@ -138,41 +128,35 @@ function HVACEstimator() {
       <input placeholder="Square Footage" value={project.squareFootage} onChange={e => setProject({ ...project, squareFootage: e.target.value })} />
       <input placeholder="Floors" value={project.floors} onChange={e => setProject({ ...project, floors: e.target.value })} />
 
+      <label>Duct Gauge:
+        <select value={gauge} onChange={e => setGauge(e.target.value)}>
+          <option value="26">26 GA</option>
+          <option value="24">24 GA</option>
+          <option value="22">22 GA</option>
+          <option value="20">20 GA</option>
+        </select>
+      </label>
+
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
       {counts && (
         <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
-          <h4>📊 Visual Count Breakdown:</h4>
+          <h4>📊 Scope Breakdown:</h4>
+          <h5>🔧 Equipment</h5>
           <ul>
-            <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
-            <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
-            <li><strong>Total Supply Devices:</strong> {counts.airDist.supplyTotal}</li>
-            <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
-            <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
-            <li><strong>Registers:</strong> {counts.airDist.registers}</li>
-            <li><strong>Total Return Devices:</strong> {counts.airDist.returnTotal}</li>
+            {Object.entries(counts.equipmentCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
           </ul>
-          <h4>🧰 Equipment Tags:</h4>
+          <h5>📐 Device Sizes</h5>
           <ul>
-            {Object.entries(counts.equipmentCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
-            ))}
+            {Object.entries(counts.sizeCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
           </ul>
-          <h4>🛠️ Piping Runs:</h4>
+          <h5>🛠️ Pipe Sizes</h5>
           <ul>
-            {Object.entries(counts.pipingCounts).map(([key, value]) => (
-              <li key={key}><strong>{key}</strong>: {value}</li>
-            ))}
+            {Object.entries(counts.pipingCounts).map(([key, val]) => <li key={key}>{key}: {val}</li>)}
           </ul>
-          <h4>📐 Device Sizes:</h4>
-          <ul>
-            {Object.entries(counts.sizeCounts).map(([size, count]) => (
-              <li key={size}><strong>{size}</strong>: {count}</li>
-            ))}
-          </ul>
-          <h4>📏 Estimated Linear Footage:</h4>
-          <p><strong>Total:</strong> {counts.linearTakeoff} feet</p>
+          <h5>⚖️ Duct Weight</h5>
+          <p><strong>Total Estimated Weight:</strong> {counts.ductWeight} lbs (Gauge {gauge})</p>
         </div>
       )}
 
@@ -181,5 +165,3 @@ function HVACEstimator() {
     </div>
   );
 }
-
-export default HVACEstimator;
