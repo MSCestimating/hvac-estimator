@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with visual breakdown of tag counts
+// HVACEstimator.jsx with equipment, air distribution, and piping breakdown counts
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,6 +49,24 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
+    const key = tag.split(/[-\s]/)[0].toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
+    size: normalizeFractionalSize(m[1]),
+    type: m[3]?.toUpperCase()
+  }));
+
+  const pipingCounts = pipeSizes.reduce((acc, cur) => {
+    const key = `${cur.size || '?"'} ${cur.type}`;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
   const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
   const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
   const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
@@ -65,13 +83,13 @@ function extractHVACDetails(text) {
     returnTotal: returnTags + grilles + registers
   };
 
-  return { airDist };
+  return { equipmentCounts, airDist, pipingCounts };
 }
 
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
-  const [airCounts, setAirCounts] = useState(null);
+  const [counts, setCounts] = useState(null);
   const [blueprintText, setBlueprintText] = useState("");
 
   useEffect(() => {
@@ -88,7 +106,6 @@ export default function HVACEstimator() {
       const strings = content.items.map((item) => item.str).join(" ");
       fullText += strings + "\n";
     }
-
     return fullText;
   };
 
@@ -98,7 +115,7 @@ export default function HVACEstimator() {
     const text = await extractPDFText(file);
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
-    setAirCounts(parsed.airDist);
+    setCounts(parsed);
   };
 
   return (
@@ -115,17 +132,29 @@ export default function HVACEstimator() {
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
-      {airCounts && (
+      {counts && (
         <div style={{ background: "#f3f3f3", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
           <h4>📊 Visual Count Breakdown:</h4>
           <ul>
-            <li><strong>Supply Tags:</strong> {airCounts.supplyTags}</li>
-            <li><strong>Diffusers:</strong> {airCounts.diffusers}</li>
-            <li><strong>Total Supply Devices:</strong> {airCounts.supplyTotal}</li>
-            <li><strong>Return Tags:</strong> {airCounts.returnTags}</li>
-            <li><strong>Grilles:</strong> {airCounts.grilles}</li>
-            <li><strong>Registers:</strong> {airCounts.registers}</li>
-            <li><strong>Total Return Devices:</strong> {airCounts.returnTotal}</li>
+            <li><strong>Supply Tags:</strong> {counts.airDist.supplyTags}</li>
+            <li><strong>Diffusers:</strong> {counts.airDist.diffusers}</li>
+            <li><strong>Total Supply Devices:</strong> {counts.airDist.supplyTotal}</li>
+            <li><strong>Return Tags:</strong> {counts.airDist.returnTags}</li>
+            <li><strong>Grilles:</strong> {counts.airDist.grilles}</li>
+            <li><strong>Registers:</strong> {counts.airDist.registers}</li>
+            <li><strong>Total Return Devices:</strong> {counts.airDist.returnTotal}</li>
+          </ul>
+          <h4>🧰 Equipment Tags:</h4>
+          <ul>
+            {Object.entries(counts.equipmentCounts).map(([key, value]) => (
+              <li key={key}><strong>{key}</strong>: {value}</li>
+            ))}
+          </ul>
+          <h4>🛠️ Piping Runs:</h4>
+          <ul>
+            {Object.entries(counts.pipingCounts).map(([key, value]) => (
+              <li key={key}><strong>{key}</strong>: {value}</li>
+            ))}
           </ul>
         </div>
       )}
@@ -135,5 +164,6 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
 
 
