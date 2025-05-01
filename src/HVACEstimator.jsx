@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with tonnage and duct size tracking
+// HVACEstimator.jsx with full scope and duct weight estimation in lbs
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -38,37 +38,36 @@ const provider = new GoogleAuthProvider();
 function extractDuctSizes(text) {
   const rectangularMatches = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => ({
     type: "rectangular",
-    width: parseFloat(m[1]) / 12,
-    height: parseFloat(m[2]) / 12,
+    width: parseFloat(m[1]),
+    height: parseFloat(m[2]),
     label: `${m[1]}x${m[2]}`
   }));
 
   const roundMatches = [...text.matchAll(/\b(\d{1,2})\"?\s?(DIA|Ø|SPIRAL|PIPE)\b/gi)].map(m => ({
     type: "round",
-    diameter: parseFloat(m[1]) / 12,
+    diameter: parseFloat(m[1]),
     label: `${m[1]}" DIA`
   }));
 
   return [...rectangularMatches, ...roundMatches];
 }
 
-function calculateTonnageFromDucts(ducts) {
-  let totalCFM = 0;
-  const velocity = 800; // fpm assumed
-
+function estimateDuctWeight(ducts) {
+  let totalWeight = 0;
+  const assumedLengthFt = 10; // per mention
   ducts.forEach(duct => {
-    let area = 0;
-    if (duct.type === 'round') {
-      const radius = duct.diameter / 2;
-      area = Math.PI * Math.pow(radius, 2);
-    } else {
-      area = duct.width * duct.height;
+    if (duct.type === 'rectangular') {
+      const w = duct.width / 12;
+      const h = duct.height / 12;
+      const sa = 2 * (w + h) * assumedLengthFt;
+      totalWeight += sa * 0.95; // avg weight 0.95 lbs/sqft
+    } else if (duct.type === 'round') {
+      const d = duct.diameter / 12;
+      const sa = Math.PI * d * assumedLengthFt;
+      totalWeight += sa * 1.25; // avg spiral weight
     }
-    const cfm = area * velocity;
-    totalCFM += cfm;
   });
-
-  return (totalCFM / 400).toFixed(2); // 400 CFM per ton
+  return totalWeight.toFixed(2);
 }
 
 function countDuctSizes(ducts) {
@@ -83,8 +82,8 @@ export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [blueprintText, setBlueprintText] = useState("");
-  const [tonnage, setTonnage] = useState(null);
   const [ductSizes, setDuctSizes] = useState({});
+  const [ductWeight, setDuctWeight] = useState(null);
 
   useEffect(() => {
     onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
@@ -108,16 +107,16 @@ export default function HVACEstimator() {
     if (!file) return;
     const text = await extractPDFText(file);
     const ducts = extractDuctSizes(text);
-    const estTonnage = calculateTonnageFromDucts(ducts);
     const ductCounts = countDuctSizes(ducts);
+    const lbs = estimateDuctWeight(ducts);
     setBlueprintText(text);
-    setTonnage(estTonnage);
     setDuctSizes(ductCounts);
+    setDuctWeight(lbs);
   };
 
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
-      <h1>HVAC Estimator – Tonnage from Ducts</h1>
+      <h1>HVAC Estimator – Ductwork by Pounds</h1>
 
       {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>}
 
@@ -129,10 +128,10 @@ export default function HVACEstimator() {
       <h3>Upload Blueprint PDF</h3>
       <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
 
-      {tonnage && (
-        <div style={{ background: "#eef", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
-          <h4>📦 Estimated Tonnage from Duct Dimensions:</h4>
-          <p><strong>Total Tons Required:</strong> {tonnage}</p>
+      {ductWeight && (
+        <div style={{ background: "#f5f5f5", padding: "1rem", marginTop: "1rem", borderRadius: "8px" }}>
+          <h4>📦 Duct Summary</h4>
+          <p><strong>Estimated Duct Weight:</strong> {ductWeight} lbs</p>
           <h5>Duct Size Breakdown:</h5>
           <ul>
             {Object.entries(ductSizes).map(([size, count]) => (
@@ -142,9 +141,8 @@ export default function HVACEstimator() {
         </div>
       )}
 
-      <h4>Raw Extracted Text (first 1000 chars)</h4>
+      <h4>Raw Extracted Text</h4>
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={6} />
     </div>
   );
 }
-
