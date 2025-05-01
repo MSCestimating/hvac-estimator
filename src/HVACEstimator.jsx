@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with improved tag detection and no canvas
+// HVACEstimator.jsx with corrected equipment tags and no canvas
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,12 +49,30 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND|EXFAN|OA|FD|SD|CTRL|BMS)[-\s]?\d*\b/gi)].map(m => m[0]);
-  const equipmentCounts = equipmentTags.reduce((acc, tag) => {
-    const key = tag.split(/[-\s]/)[0].toUpperCase();
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
+  const cleanText = text.toUpperCase();
+
+  const tagMap = {
+    RTU: /\bRTU[-\s]?\d+\b/g,
+    VAV: /\bVAV[-\s]?\d+\b/g,
+    EF: /\bEF[-\s]?\d+\b/g,
+    EXFAN: /\bEX(FAN)?[-\s]?\d+\b/g,
+    FCU: /\bFCU[-\s]?\d+\b/g,
+    MAU: /\bMAU[-\s]?\d+\b/g,
+    DOAS: /\bDOAS[-\s]?\d+\b/g,
+    AHU: /\bAHU[-\s]?\d+\b/g,
+    HP: /\bHP[-\s]?\d+\b/g,
+    COND: /\bCOND[-\s]?\d+\b/g,
+    OA: /\b(OA|O)[-\s]?\d+\b/g,
+    FD: /\bFD[-\s]?\d+\b/g,
+    SD: /\bSD[-\s]?\d+\b/g,
+    CTRL: /\b(CTRL|BMS)[-\s]?\d*\b/g
+  };
+
+  const equipmentCounts = {};
+  for (const [key, regex] of Object.entries(tagMap)) {
+    const matches = cleanText.match(regex);
+    if (matches) equipmentCounts[key] = matches.length;
+  }
 
   const pipeSizes = [...text.matchAll(/(\d{1,2}(-\d\/\d)?|\d\/\d)?\s?\"?\s?(GAS|DRYER|COND|CW|VTR|HW|HWS|CHW)/gi)].map(m => ({
     size: normalizeFractionalSize(m[1]),
@@ -67,11 +85,11 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const supplyTags = (text.match(/\bS[-\s]?\d+\b/gi) || []).length;
-  const returnTags = (text.match(/\bR[-\s]?\d+\b/gi) || []).length;
-  const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
-  const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
-  const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
+  const supplyTags = (cleanText.match(/\bS[-\s]?\d+\b/g) || []).length;
+  const returnTags = (cleanText.match(/\bR[-\s]?\d+\b/g) || []).length;
+  const diffusers = (cleanText.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/g) || []).length;
+  const grilles = (cleanText.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/g) || []).length;
+  const registers = (cleanText.match(/\b(REG|REGISTER(S)?)\b/g) || []).length;
 
   const airDist = {
     supplyTags,
@@ -83,13 +101,13 @@ function extractHVACDetails(text) {
     returnTotal: returnTags + grilles + registers
   };
 
-  const deviceSizes = [...text.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
+  const deviceSizes = [...cleanText.matchAll(/\b(\d{1,3})\s?[x×X]\s?(\d{1,3})\b/g)].map(m => `${m[1]}x${m[2]}`);
   const sizeCounts = deviceSizes.reduce((acc, sz) => {
     acc[sz] = (acc[sz] || 0) + 1;
     return acc;
   }, {});
 
-  const linearFeet = [...text.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/gi)].map(m => parseInt(m[1]));
+  const linearFeet = [...cleanText.matchAll(/\b(\d{1,4})\s?(FT|FEET|FOOT|')\b/g)].map(m => parseInt(m[1]));
   const linearTakeoff = linearFeet.reduce((a, b) => a + b, 0);
 
   return { equipmentCounts, airDist, pipingCounts, sizeCounts, linearTakeoff };
