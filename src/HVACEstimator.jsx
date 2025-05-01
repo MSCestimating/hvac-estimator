@@ -102,10 +102,36 @@ function extractHVACDetails(text) {
   };
 }
 
+function calculateLabor(counts, laborRates, ratePerHour) {
+  let totalHours = 0;
+  let totalCost = 0;
+  const laborBreakdown = [];
+
+  const add = (label, qty, hoursPerUnit) => {
+    const hours = qty * hoursPerUnit;
+    const cost = hours * ratePerHour;
+    totalHours += hours;
+    totalCost += cost;
+    laborBreakdown.push({ label, qty, hoursPerUnit, hours, cost });
+  };
+
+  add('Ductwork (ft)', counts.ductLength, laborRates.duct);
+  add('Piping (ft)', counts.pipeLength, laborRates.pipe);
+
+  Object.entries(counts.equipmentCounts).forEach(([key, val]) => {
+    const rate = laborRates[key] || 0;
+    add(`${key} (qty)`, val, rate);
+  });
+
+  return { laborBreakdown, totalHours, totalCost };
+}
+
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
   const [counts, setCounts] = useState(null);
+  const [laborRates, setLaborRates] = useState({ duct: 0.08, pipe: 0.12, RTU: 6, VAV: 2.5, EF: 2, FAN: 2, FCU: 4, MAU: 5 });
+  const [ratePerHour, setRatePerHour] = useState(55);
   const [blueprintText, setBlueprintText] = useState("");
 
   useEffect(() => {
@@ -132,6 +158,7 @@ export default function HVACEstimator() {
     const parsed = extractHVACDetails(text);
     setBlueprintText(text);
     setCounts(parsed);
+  };
   };
 
   return (
@@ -181,6 +208,19 @@ export default function HVACEstimator() {
 
       <h4>Raw Extracted Text (first 1000 chars)</h4>
       <textarea value={blueprintText.slice(0, 1000)} readOnly style={{ width: "100%" }} rows={5} />
+    {laborRates && counts && (
+        <div style={{ background: '#e8f4f8', padding: '1rem', marginTop: '1rem', borderRadius: '8px' }}>
+          <h4>🧑‍🔧 Labor Estimate</h4>
+          <ul>
+            {calculateLabor(counts, laborRates, ratePerHour).laborBreakdown.map((item, i) => (
+              <li key={i}>{item.label}: {item.qty} × {item.hoursPerUnit} hrs = {item.hours.toFixed(2)} hrs (${item.cost.toFixed(2)})</li>
+            ))}
+          </ul>
+          <p><strong>Total Hours:</strong> {calculateLabor(counts, laborRates, ratePerHour).totalHours.toFixed(2)} hrs</p>
+          <p><strong>Total Labor Cost:</strong> ${calculateLabor(counts, laborRates, ratePerHour).totalCost.toFixed(2)}</p>
+        </div>
+      )}
+
     </div>
   );
 }
