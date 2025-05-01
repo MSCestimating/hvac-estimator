@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with duct, pipe, equipment, air distribution, sizes
+// HVACEstimator.jsx updated to fix FAN tag and improve duct/pipe length detection
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -49,7 +49,7 @@ function normalizeFractionalSize(size) {
 }
 
 function extractHVACDetails(text) {
-  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND|FAN)[-\s]?\d+\b/gi)].map(m => m[0]);
+  const equipmentTags = [...text.matchAll(/\b(RTU|EF|FCU|VAV|AHU|DOAS|MAU|ACU|HP|COND|FAN[-\s]?\d+)\b/gi)].map(m => m[0]);
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
     const key = tag.split(/[-\s]/)[0].toUpperCase();
     acc[key] = (acc[key] || 0) + 1;
@@ -89,8 +89,8 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const ductMentions = [...text.matchAll(/\b(\d{1,4})\s?(FT|FOOT|FEET)\s?DUCT\b/gi)].map(m => parseInt(m[1]));
-  const pipeMentions = [...text.matchAll(/\b(\d{1,4})\s?(FT|FOOT|FEET)\s?PIPE\b/gi)].map(m => parseInt(m[1]));
+  const ductMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DUCT)\b/gi)].map(m => parseInt(m[1]));
+  const pipeMentions = [...text.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(PIPE)\b/gi)].map(m => parseInt(m[1]));
 
   return {
     equipmentCounts,
@@ -184,3 +184,4 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
