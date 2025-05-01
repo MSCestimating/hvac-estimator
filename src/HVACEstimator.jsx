@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with advanced parsing: fractional sizes, groupings, and improved detection
+// HVACEstimator.jsx with air distribution detection (grilles, diffusers, registers)
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -57,18 +57,24 @@ function extractHVACDetails(text) {
   }));
   const lengths = [...text.matchAll(/(\d{1,4})\s?(FT|FEET|FOOT|')/gi)].map(m => parseInt(m[1]));
 
+  const airDist = {
+    diffusers: (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD|RD)\b/gi) || []).length,
+    grilles: (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length,
+    registers: (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length
+  };
+
   const equipmentCounts = equipmentTags.reduce((acc, tag) => {
     const key = tag.split(/[-\s]/)[0].toUpperCase();
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
 
-  return { equipmentCounts, equipmentTags, ductSizes, pipeSizes, lengths };
+  return { equipmentCounts, equipmentTags, ductSizes, pipeSizes, lengths, airDist };
 }
 
 function summarizeScope(data) {
-  const { equipmentCounts, ductSizes, pipeSizes, lengths } = data;
-  const sections = { Equipment: [], Ductwork: [], Piping: [] };
+  const { equipmentCounts, ductSizes, pipeSizes, lengths, airDist } = data;
+  const sections = { Equipment: [], Ductwork: [], Piping: [], "Air Distribution": [] };
 
   for (const [key, value] of Object.entries(equipmentCounts)) {
     sections.Equipment.push(`Install ${value} ${key} units.`);
@@ -87,6 +93,10 @@ function summarizeScope(data) {
     }, {});
     Object.entries(grouped).forEach(([type, count]) => sections.Piping.push(`Install ${count} runs of ${type} piping.`));
   }
+
+  if (airDist.diffusers) sections["Air Distribution"].push(`Install ${airDist.diffusers} diffusers.`);
+  if (airDist.grilles) sections["Air Distribution"].push(`Install ${airDist.grilles} grilles.`);
+  if (airDist.registers) sections["Air Distribution"].push(`Install ${airDist.registers} registers.`);
 
   return Object.entries(sections).map(([section, lines]) => `\n--- ${section} ---\n${lines.join("\n")}`).join("\n");
 }
@@ -168,3 +178,4 @@ export default function HVACEstimator() {
     </div>
   );
 }
+
