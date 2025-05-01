@@ -107,8 +107,10 @@ function extractHVACDetails(text) {
     return acc;
   }, {});
 
-  const ductMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DUCT)\b/g)].map(m => parseInt(m[1]));
-  const pipeMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(PIPE)\b/g)].map(m => parseInt(m[1]));
+  const ductMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?\bDUCT\b/g)].map(m => parseInt(m[1]));
+  const pipeMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?\bPIPE\b/g)].map(m => parseInt(m[1]));
+  const dryerExhaustMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(DRYER VENT|DRYER EXHAUST)\b/g)].map(m => parseInt(m[1]));
+  const makeupAirMentions = [...cleanText.matchAll(/\b(\d{1,4})\s?(?:'|FT|FEET)\b[^\n]*?(MAKE[-\s]?UP AIR|MUA|MAU)\b/g)].map(m => parseInt(m[1]));
 
   return {
     equipmentCounts,
@@ -116,7 +118,9 @@ function extractHVACDetails(text) {
     pipingCounts,
     sizeCounts,
     ductLength: ductMentions.reduce((a, b) => a + b, 0),
-    pipeLength: pipeMentions.reduce((a, b) => a + b, 0)
+    pipeLength: pipeMentions.reduce((a, b) => a + b, 0),
+    dryerExhaustLength: dryerExhaustMentions.reduce((a, b) => a + b, 0),
+    makeupAirLength: makeupAirMentions.reduce((a, b) => a + b, 0)
   };
 }
 
@@ -185,6 +189,8 @@ function HVACEstimator() {
           <ul>
             <li><strong>Duct Length:</strong> {counts.ductLength} feet</li>
             <li><strong>Pipe Length:</strong> {counts.pipeLength} feet</li>
+            <li><strong>Dryer Exhaust Length:</strong> {counts.dryerExhaustLength} feet</li>
+            <li><strong>Make-Up Air Length:</strong> {counts.makeupAirLength} feet</li>
           </ul>
           <h5>🛠️ Pipe Sizes</h5>
           <ul>
