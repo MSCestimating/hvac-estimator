@@ -152,7 +152,23 @@ function calculateLabor(counts, laborRates, ratePerHour) {
 }
 
 function HVACEstimator() {
-  // React component logic will continue here in your project
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    onAuthStateChanged(auth, setUser);
+  }, []);
+
+  return (
+    <div style={{ padding: "2rem" }}>
+      <h1>HVAC Estimator</h1>
+      {user ? (
+        <p>Welcome, {user.displayName}</p>
+      ) : (
+        <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>
+      )}
+      <p>The UI is working! Additional features will appear here soon.</p>
+    </div>
+  );
 }
 
 export default HVACEstimator;
