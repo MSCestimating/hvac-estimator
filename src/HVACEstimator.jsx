@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with dynamic OCR import for Vercel compatibility
+// HVACEstimator.jsx using OCR.space API for scanned PDF text extraction
 import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -78,7 +78,6 @@ function simulateDomainHVACEstimator(text) {
 export default function HVACEstimator() {
   const [user, setUser] = useState(null);
   const [project, setProject] = useState({ name: "", location: "", squareFootage: "", floors: "" });
-  const [quoteItems, setQuoteItems] = useState([]);
   const [scopeSummary, setScopeSummary] = useState("");
   const [equipmentSummary, setEquipmentSummary] = useState("");
   const [blueprintText, setBlueprintText] = useState("");
@@ -98,22 +97,21 @@ export default function HVACEstimator() {
       fullText += strings + "\n";
     }
 
+    // If no text found, fallback to OCR.space
     if (fullText.length < 50) {
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-      await page.render({ canvasContext: context, viewport }).promise;
+      const formData = new FormData();
+      formData.append("apikey", "helloworld"); // Free public test key
+      formData.append("isOverlayRequired", "false");
+      formData.append("file", file);
+      formData.append("OCREngine", "2");
 
-      const { createWorker } = await import("tesseract.js");
-      const worker = await createWorker();
-      await worker.loadLanguage("eng");
-      await worker.initialize("eng");
-      const { data } = await worker.recognize(canvas);
-      await worker.terminate();
-      fullText = data.text;
+      const response = await fetch("https://api.ocr.space/parse/image", {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
+      fullText = result.ParsedResults?.[0]?.ParsedText || "";
     }
 
     return fullText;
