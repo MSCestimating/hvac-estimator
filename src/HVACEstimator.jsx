@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with all features: visual detection, duct size/length, weight, labor, Firebase auth, PDF parsing
+// HVACEstimator.jsx with visual detection, weight calc, labor tracking, and full features
 import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -60,7 +60,6 @@ function extractHVACDetails(text) {
     size: normalizeFractionalSize(m[1]),
     type: m[3]?.toUpperCase()
   }));
-
   const pipingCounts = pipeSizes.reduce((acc, cur) => {
     const key = `${cur.size || '?"'} ${cur.type}`;
     acc[key] = (acc[key] || 0) + 1;
@@ -72,7 +71,6 @@ function extractHVACDetails(text) {
   const diffusers = (text.match(/\b(DIFF[-\s]?\d+|DIFFUSER(S)?|SD)\b/gi) || []).length;
   const grilles = (text.match(/\b(GRL|GRILLE(S)?|RG|EG)\b/gi) || []).length;
   const registers = (text.match(/\b(REG|REGISTER(S)?)\b/gi) || []).length;
-
   const airDist = {
     supplyTags,
     returnTags,
@@ -98,16 +96,24 @@ function extractHVACDetails(text) {
       ductSizeLengthMap[size] = (ductSizeLengthMap[size] || 0) + length;
     }
   });
-
   const totalDuctLength = Object.values(ductSizeLengthMap).reduce((a, b) => a + b, 0);
 
-  const laborRates = { duct: 0.15, pipe: 0.1, equipment: 4 }; // hours per unit
-  const totalLabor = (
-    totalDuctLength * laborRates.duct +
-    Object.values(pipingCounts).reduce((a, b) => a + b, 0) * laborRates.pipe +
-    Object.values(equipmentCounts).reduce((a, b) => a + b, 0) * laborRates.equipment
-  ).toFixed(2);
-  const laborCost = (totalLabor * 55).toFixed(2); // $55/hr
+  const laborPerFt = 0.15; // hrs/ft (est.)
+  const gauge = 26;
+  const weightPerSqFtByGauge = {
+    26: 1.00, // lbs/sqft (simplified)
+    24: 1.25,
+    22: 1.50,
+    20: 2.00
+  };
+  const weightCalc = Object.entries(ductSizeLengthMap).reduce((total, [sz, len]) => {
+    const [w, h] = sz.split("x").map(n => parseInt(n));
+    if (isNaN(w) || isNaN(h)) return total;
+    const perimeter = 2 * (w + h) / 12;
+    const sqft = perimeter * len;
+    const lbs = sqft * (weightPerSqFtByGauge[gauge] || 1);
+    return total + lbs;
+  }, 0);
 
   return {
     equipmentCounts,
@@ -116,14 +122,71 @@ function extractHVACDetails(text) {
     sizeCounts,
     ductSizeLengthMap,
     ductLength: totalDuctLength,
-    totalLabor,
-    laborCost
+    estimatedWeight: weightCalc.toFixed(1),
+    estimatedLaborHours: (totalDuctLength * laborPerFt).toFixed(1)
   };
 }
 
 function HVACEstimator() {
-  // UI logic is unchanged, assumed in your canvas version
-  return null;
+  const [user, setUser] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [blueprintText, setBlueprintText] = useState("");
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (u) => setUser(u));
+  }, []);
+
+  const extractPDFText = async (file) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item) => item.str).join(" ");
+      fullText += strings + "\n";
+    }
+    return fullText;
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await extractPDFText(file);
+    const parsed = extractHVACDetails(text);
+    setBlueprintText(text);
+    setCounts(parsed);
+  };
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+      <h1>HVAC Estimator</h1>
+      {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>}
+      <input type="file" accept="application/pdf" onChange={handleUpload} />
+      {counts && (
+        <div>
+          <h3>📊 Scope Summary</h3>
+          <p><strong>Duct Length:</strong> {counts.ductLength} ft</p>
+          <p><strong>Estimated Weight:</strong> {counts.estimatedWeight} lbs</p>
+          <p><strong>Labor (duct):</strong> {counts.estimatedLaborHours} hrs</p>
+          <h4>Equipment</h4>
+          <ul>{Object.entries(counts.equipmentCounts).map(([k, v]) => <li key={k}>{k}: {v}</li>)}</ul>
+          <h4>Piping</h4>
+          <ul>{Object.entries(counts.pipingCounts).map(([k, v]) => <li key={k}>{k}: {v}</li>)}</ul>
+          <h4>Air Devices</h4>
+          <ul>
+            <li>Supply Tags: {counts.airDist.supplyTags}</li>
+            <li>Return Tags: {counts.airDist.returnTags}</li>
+            <li>Diffusers: {counts.airDist.diffusers}</li>
+            <li>Grilles: {counts.airDist.grilles}</li>
+            <li>Registers: {counts.airDist.registers}</li>
+          </ul>
+          <h4>Duct Sizes</h4>
+          <ul>{Object.entries(counts.ductSizeLengthMap).map(([sz, len]) => <li key={sz}>{sz}: {len} ft</li>)}</ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default HVACEstimator;
