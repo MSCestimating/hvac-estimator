@@ -136,6 +136,66 @@ function extractHVACDetails(text) {
 }
 
 export default function HVACEstimator() {
-  // Existing component logic continues here, unchanged
-  return null; // Placeholder, continue rendering UI logic as already defined in your app
+  const [user, setUser] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [text, setText] = useState("");
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+  }, []);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    await page.render({ canvasContext: context, viewport }).promise;
+    const imageDataURL = canvas.toDataURL("image/png");
+
+    const { data: { text: ocrText } } = await Tesseract.recognize(imageDataURL, "eng");
+    setText(ocrText);
+    setCounts(extractHVACDetails(ocrText));
+  };
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: "900px", margin: "0 auto" }}>
+      <h1>HVAC Estimator</h1>
+      {user ? (
+        <p>Welcome, {user.displayName}</p>
+      ) : (
+        <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>
+      )}
+
+      <h3>Upload Blueprint PDF</h3>
+      <input type="file" accept="application/pdf" onChange={handleFileUpload} />
+
+      {counts && (
+        <div style={{ marginTop: "1rem", padding: "1rem", background: "#f3f3f3", borderRadius: "8px" }}>
+          <h4>📊 Scope Breakdown:</h4>
+          <ul>
+            <li><strong>Total Duct Length:</strong> {counts.ductLength} ft</li>
+            <li><strong>Total Duct Weight:</strong> {counts.ductWeight.toFixed(2)} lbs</li>
+            <li><strong>Equipment Tags:</strong> {Object.entries(counts.equipmentCounts).map(([k, v]) => `${k}: ${v}`).join(", ")}</li>
+            <li><strong>Pipe Sizes:</strong> {Object.entries(counts.pipingCounts).map(([k, v]) => `${k}: ${v}`).join(", ")}</li>
+            <li><strong>Device Sizes:</strong> {Object.entries(counts.sizeCounts).map(([k, v]) => `${k}: ${v}`).join(", ")}</li>
+          </ul>
+        </div>
+      )}
+
+      {text && (
+        <div style={{ marginTop: "1rem" }}>
+          <h4>Raw OCR Text Preview</h4>
+          <textarea value={text.slice(0, 1000)} readOnly rows={6} style={{ width: "100%" }} />
+        </div>
+      )}
+    </div>
+  );
 }
