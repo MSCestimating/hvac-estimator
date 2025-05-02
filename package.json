@@ -12,7 +12,8 @@
     "jspdf": "^2.5.1",
     "pdfjs-dist": "^3.4.120",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tesseract.js": "^4.0.2"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
