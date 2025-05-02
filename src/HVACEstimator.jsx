@@ -136,6 +136,17 @@ function extractHVACDetails(text) {
 }
 
 export default function HVACEstimator() {
-  // Existing component logic continues here, unchanged
-  return null; // Placeholder, continue rendering UI logic as already defined in your app
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+  }, []);
+
+  return (
+    <div style={{ padding: '2rem' }}>
+      <h1>HVAC Estimator</h1>
+      {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Login with Google</button>}
+      <p>This is a placeholder UI. Upload blueprint functionality should follow here.</p>
+    </div>
+  );
 }
