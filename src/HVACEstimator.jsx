@@ -1,4 +1,4 @@
-// HVACEstimator.jsx with full feature set and OCR-based AI duct detection
+// HVACEstimator.jsx with full feature set and OCR-based AI duct detection and UI
 import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
@@ -136,6 +136,53 @@ function extractHVACDetails(text) {
 }
 
 export default function HVACEstimator() {
-  // Existing component logic continues here, unchanged
-  return null; // Placeholder, continue rendering UI logic as already defined in your app
+  const [user, setUser] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [blueprintText, setBlueprintText] = useState("");
+
+  useEffect(() => {
+    onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+  }, []);
+
+  const handleBlueprintUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: context, viewport }).promise;
+    const dataUrl = canvas.toDataURL();
+
+    const { data: { text } } = await Tesseract.recognize(dataUrl, "eng");
+    setBlueprintText(text);
+    setCounts(extractHVACDetails(text));
+  };
+
+  return (
+    <div style={{ padding: "2rem" }}>
+      <h1>HVAC Estimator</h1>
+      {user ? <p>Welcome, {user.displayName}</p> : <button onClick={() => signInWithPopup(auth, provider)}>Sign In</button>}
+      <input type="file" accept="application/pdf" onChange={handleBlueprintUpload} />
+
+      {counts && (
+        <div style={{ marginTop: "2rem" }}>
+          <h3>Duct Length: {counts.ductLength} ft</h3>
+          <h3>Duct Weight: {counts.ductWeight.toFixed(2)} lbs</h3>
+          <h4>Equipment</h4>
+          <ul>
+            {Object.entries(counts.equipmentCounts).map(([k, v]) => <li key={k}>{k}: {v}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <h4>Extracted Text (first 1000 chars)</h4>
+      <textarea readOnly value={blueprintText.slice(0, 1000)} style={{ width: "100%" }} rows={6} />
+    </div>
+  );
 }
